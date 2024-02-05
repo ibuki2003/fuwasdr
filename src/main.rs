@@ -1,19 +1,17 @@
 #![no_std]
 #![no_main]
 
+use fuwasdr::hal;
+use fuwasdr::bsp;
+
 use defmt::*;
-use defmt_rtt as _;
-use panic_probe as _;
 
-use rp2040_hal as hal;
-use rp_pico as bsp;
-
-use embedded_hal::digital::v2::OutputPin;
+use embedded_hal::digital::OutputPin;
 
 use hal::{
     pac,
     watchdog::Watchdog,
-    gpio::{Pins, Pin, self},
+    gpio::Pins,
     Clock,
 };
 
