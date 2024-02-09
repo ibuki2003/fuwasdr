@@ -9,3 +9,4 @@ pub use rp_pico as bsp;
 pub mod pins;
 
 pub mod dsp;
+pub mod codec;
