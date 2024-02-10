@@ -360,6 +360,7 @@ dependencies = [
  "auto_ops",
  "cortex-m",
  "cortex-m-rt",
+ "critical-section",
  "defmt",
  "defmt-rtt",
  "embedded-hal 1.0.0",
