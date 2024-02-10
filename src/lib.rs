@@ -10,3 +10,6 @@ pub mod pins;
 
 pub mod dsp;
 pub mod codec;
+pub mod clockctl;
+pub mod i2c;
+pub mod util;
