@@ -8,9 +8,9 @@ pub use rp_pico as bsp;
 
 pub mod pins;
 
+pub mod clockctl;
+pub mod codec;
 pub mod core;
 pub mod dsp;
-pub mod codec;
-pub mod clockctl;
 pub mod i2c;
 pub mod util;

@@ -19,8 +19,10 @@ pub fn main() -> ! {
         pac.PLL_SYS,
         pac.PLL_USB,
         &mut pac.RESETS,
-        &mut watchdog
-    ).ok().unwrap();
+        &mut watchdog,
+    )
+    .ok()
+    .unwrap();
 
     let sio = Sio::new(pac.SIO);
     let pins = Pins::new(

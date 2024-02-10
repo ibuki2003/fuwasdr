@@ -37,4 +37,3 @@ pub type OnBoardLed = Gpio25;
 
 pub type PinButton2 = Gpio27;
 pub type PinButton1 = Gpio28;
-

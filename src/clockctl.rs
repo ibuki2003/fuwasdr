@@ -44,11 +44,11 @@ impl<I2C: I2c> ClockCtl<I2C> {
             .transaction(
                 Self::I2C_ADDR,
                 i2c_writes![
-                    [3, 0xff], // disable all outputs
-                    [15, 0x00], // PLLx_SRC = 0, DIV=1
-                    [149, 0, 0], // spread spectrum disable
+                    [3, 0xff],        // disable all outputs
+                    [15, 0x00],       // PLLx_SRC = 0, DIV=1
+                    [149, 0, 0],      // spread spectrum disable
                     [183, 0b10 << 6], // CL = 8pF
-                    [187, 0], // CL = 8pF
+                    [187, 0],         // CL = 8pF
                 ],
             )
             .map_err(|_| Error::I2cError)?;
@@ -120,8 +120,8 @@ impl<I2C: I2c> ClockCtl<I2C> {
                             0,
                         ],
                         [165, 0, div as u8], // PHOFF
-                        [177, 0xa0], // pll reset
-                        [9, !0b11], // enable all outputs
+                        [177, 0xa0],         // pll reset
+                        [9, !0b11],          // enable all outputs
                     ],
                 )
                 .map_err(|_| Error::I2cError)?;
