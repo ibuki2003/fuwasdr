@@ -4,7 +4,7 @@ use crate::hal;
 use hal::pio::PIOExt;
 use hal::{pac, pio::PIOBuilder};
 
-use crate::pins::*;
+use crate::board::*;
 use embedded_hal::i2c::{I2c, SevenBitAddress};
 use hal::gpio::{AnyPin, FunctionNull, FunctionPio0, Pin, PullDown, SpecificPin};
 
