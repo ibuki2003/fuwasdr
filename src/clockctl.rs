@@ -1,8 +1,7 @@
 // Clock Generator Si5351A manipulation
+use crate::i2c::SHARED_I2CBUS;
 use embedded_hal::i2c::I2c;
 use rp2040_hal::fugit::HertzU32;
-
-use crate::i2c::SHARED_I2CBUS;
 
 const XTAL_FREQ: HertzU32 = HertzU32::MHz(25_u32);
 
@@ -15,6 +14,16 @@ pub enum Error {
     I2cError,
     DeviceInInitialization,
     InvalidValue,
+}
+
+impl core::fmt::Debug for Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::I2cError => "I2C error",
+            Self::DeviceInInitialization => "Device in initialization",
+            Self::InvalidValue => "Invalid value",
+        })
+    }
 }
 
 impl ClockCtl {
@@ -46,6 +55,7 @@ impl ClockCtl {
                 &[149, 0, 0],      // spread spectrum disable
                 &[183, 0b10 << 6], // CL = 8pF
                 &[187, 0],         // CL = 8pF
+                &[3, 0x00],        // enable all outputs again
             ];
 
             for chunk in chunks {
@@ -79,33 +89,37 @@ impl ClockCtl {
         if a != 0 {
             // just set pll
             self.set_plla_mul(a, self.current_tune_factors.c)?;
+        } else {
+            // change div
+            self.current_tune_factors =
+                TUNE_FACTORS[find_div_idx(target).ok_or(Error::InvalidValue)?];
+            self.set_div(self.current_tune_factors.div)?;
+            let a = self.current_tune_factors.get_synth_param(target);
+            self.set_plla_mul(a, self.current_tune_factors.c)?;
         }
-        // change div
-        self.current_tune_factors =
-            TUNE_FACTORS[find_div_idx(target).ok_or(Error::InvalidValue)?];
-        self.set_div(self.current_tune_factors.div)?;
 
         Ok(())
     }
 
     fn set_div(&mut self, div: u32) -> Result<(), Error> {
+        defmt::info!("setting div {}", div);
         if div <= 127 {
-            let r0 = (div >> 9) as u8 | if div == 4 { 1 << 3 } else { 0 };
+            let p1 = div - 4;
+            let r0 = if div == 4 { 0b11 << 2 } else { (p1 >> 9) as u8 };
             critical_section::with(|cs| {
                 let mut rc = SHARED_I2CBUS.borrow(cs).borrow_mut();
                 let i2c = rc.as_mut().unwrap();
                 let chunks: &[&[u8]] = &[
-                    &[9, 0xff],        // disable all outputs
+                    &[3, 0xff],        // disable all outputs
                     &[16, 0xc0, 0xc0], // power down
-                    &[16, 0x4f, 0x4f], // CLK0 power up TODO: drive strength
                     &[
                         42,
-                        // MS0 (a = div, b = 0, c = 1)
+                        // MS0 (a = div * 128 - 512, b = 0, c = 1)
                         0,
                         1,
                         r0,
-                        (div >> 1) as u8,
-                        (div << 7) as u8,
+                        (p1 >> 1) as u8,
+                        (p1 << 7) as u8,
                         0,
                         0,
                         0,
@@ -113,15 +127,16 @@ impl ClockCtl {
                         0,
                         1,
                         r0,
-                        (div >> 1) as u8,
-                        (div << 7) as u8,
+                        (p1 >> 1) as u8,
+                        (p1 << 7) as u8,
                         0,
                         0,
                         0,
                     ],
                     &[165, 0, div as u8], // PHOFF
                     &[177, 0xa0],         // pll reset
-                    &[9, !0b11],          // enable all outputs
+                    &[16, 0x4f, 0x4f],    // CLK0 power up TODO: drive strength
+                    &[3, 0b00],           // enable all outputs
                 ];
 
                 for chunk in chunks {
@@ -131,7 +146,9 @@ impl ClockCtl {
                 Ok(())
             })
         } else {
-            todo!("set phase with hack");
+            // todo!("set phase with hack");
+            defmt::info!("not implemented. ignoring");
+            Ok(())
         }
     }
 
@@ -147,7 +164,7 @@ impl ClockCtl {
             i2c.write(
                 Self::I2C_ADDR,
                 &[
-                    0x1a, // MSNA
+                    26, // MSNA
                     (c >> 8) as u8,
                     c as u8,
                     (p1 >> 16) as u8,
@@ -172,7 +189,8 @@ const TUNE_FACTORS: [TuneFactors; 27] = [
         div: 6,
         ts: 10,
         c: 833_333,
-        _mult: 6 * 833_333,
+        _mult: (5_000_000_u32 >> 6).wrapping_mul(XTAL_FREQ_INV_M),
+        _mult_tz: 6,
     }, // rounded, not exact
     TuneFactors::new_div(   8, 10, 1),
     TuneFactors::new_div(  10, 10, 1),
@@ -248,7 +266,11 @@ struct TuneFactors {
     c: u32,
     // for optimal calculation; (A*C + B) === a_mult * F_OUT / F_XTAL
     _mult: u32,
+    _mult_tz: u8,
 }
+
+const XTAL_FREQ_INV_M: u32 = 585698849; // modular inverse of 25MHz
+const XTAL_FREQ_TRAILING_ZEROS: u8 = 6;
 
 impl TuneFactors {
     const MIN_MULT: u32 = 24;
@@ -259,18 +281,30 @@ impl TuneFactors {
         assert!(XTAL_FREQ.to_Hz() * step % (div * ts as u32) == 0);
         let c = XTAL_FREQ.to_Hz() * step / (div * ts as u32);
         let _mult = div * c;
-        Self { div, ts, c, _mult }
+        let _mult_tz = _mult.trailing_zeros() as u8;
+        let _mult = (_mult >> _mult_tz).wrapping_mul(XTAL_FREQ_INV_M);
+        Self {
+            div,
+            ts,
+            c,
+            _mult,
+            _mult_tz,
+        }
     }
 
     #[inline]
     fn get_synth_param(&self, target: HertzU32) -> u32 {
-        let mut v: u32 = target.to_Hz().wrapping_mul(self._mult) / XTAL_FREQ.to_Hz();
-        if v < self.c * Self::MIN_MULT {
+        if target.to_Hz() * self.div > XTAL_FREQ.to_Hz() * Self::MAX_MULT {
             return 0;
         } // out of range
-        if v > self.c * Self::MAX_MULT {
+        if target.to_Hz() * self.div < XTAL_FREQ.to_Hz() * Self::MIN_MULT {
             return 0;
         } // out of range
-        v
+
+        // target is assumed (ensured) to be divisible by ts
+        let tz: u8 = target.to_Hz().trailing_zeros() as u8;
+        debug_assert!(self._mult_tz + tz >= XTAL_FREQ_TRAILING_ZEROS);
+        let v = (target.to_Hz() >> tz).wrapping_mul(self._mult);
+        v << (self._mult_tz + tz - XTAL_FREQ_TRAILING_ZEROS)
     }
 }
