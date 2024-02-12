@@ -1,14 +1,12 @@
 // Clock Generator Si5351A manipulation
-use embedded_hal::i2c::{I2c, SevenBitAddress};
+use embedded_hal::i2c::I2c;
 use rp2040_hal::fugit::HertzU32;
 
-use crate::i2c_writes;
+use crate::i2c::SHARED_I2CBUS;
 
 const XTAL_FREQ: HertzU32 = HertzU32::MHz(25_u32);
 
-pub struct ClockCtl<I2C: I2c<SevenBitAddress>> {
-    i2c: I2C,
-
+pub struct ClockCtl {
     current_freq: HertzU32,
     current_tune_factors: TuneFactors,
 }
@@ -19,40 +17,43 @@ pub enum Error {
     InvalidValue,
 }
 
-impl<I2C: I2c> ClockCtl<I2C> {
+impl ClockCtl {
     pub const I2C_ADDR: u8 = 0b110_0000;
     pub const XTAL_FREQ: HertzU32 = XTAL_FREQ;
 
-    pub fn new(i2c: I2C) -> Self {
+    pub fn new() -> Self {
         Self {
-            i2c,
             current_freq: HertzU32::MHz(0),
             current_tune_factors: TUNE_FACTORS[0],
         }
     }
 
     pub fn init(&mut self) -> Result<(), Error> {
-        let mut buf = [0; 1];
-        self.i2c
-            .write_read(Self::I2C_ADDR, &[0x00], &mut buf)
-            .map_err(|_| Error::I2cError)?;
-        if buf[0] & (1 << 7) != 0 {
-            return Err(Error::DeviceInInitialization);
-        }
+        critical_section::with(|cs| {
+            let mut rc = SHARED_I2CBUS.borrow(cs).borrow_mut();
+            let i2c = rc.as_mut().unwrap();
 
-        self.i2c
-            .transaction(
-                Self::I2C_ADDR,
-                i2c_writes![
-                    [3, 0xff],        // disable all outputs
-                    [15, 0x00],       // PLLx_SRC = 0, DIV=1
-                    [149, 0, 0],      // spread spectrum disable
-                    [183, 0b10 << 6], // CL = 8pF
-                    [187, 0],         // CL = 8pF
-                ],
-            )
-            .map_err(|_| Error::I2cError)?;
-        Ok(())
+            let mut buf = [0; 1];
+            i2c.write_read(Self::I2C_ADDR, &[0x00], &mut buf)
+                .map_err(|_| Error::I2cError)?;
+            if buf[0] & (1 << 7) != 0 {
+                return Err(Error::DeviceInInitialization);
+            }
+
+            let chunks: &[&[u8]] = &[
+                &[3, 0xff],        // disable all outputs
+                &[15, 0x00],       // PLLx_SRC = 0, DIV=1
+                &[149, 0, 0],      // spread spectrum disable
+                &[183, 0b10 << 6], // CL = 8pF
+                &[187, 0],         // CL = 8pF
+            ];
+
+            for chunk in chunks {
+                i2c.write(Self::I2C_ADDR, chunk)
+                    .map_err(|_| Error::I2cError)?;
+            }
+            Ok(())
+        })
     }
 
     pub const fn make_clk_control(
@@ -90,42 +91,45 @@ impl<I2C: I2c> ClockCtl<I2C> {
     fn set_div(&mut self, div: u32) -> Result<(), Error> {
         if div <= 127 {
             let r0 = (div >> 9) as u8 | if div == 4 { 1 << 3 } else { 0 };
-            self.i2c
-                .transaction(
-                    Self::I2C_ADDR,
-                    i2c_writes![
-                        [9, 0xff], // disable all outputs
-                        // koreiru?
-                        [16, 0xc0, 0xc0], // power down
-                        [16, 0x4f, 0x4f], // CLK0 power up TODO: drive strength
-                        [
-                            42,
-                            // MS0 (a = div, b = 0, c = 1)
-                            0,
-                            1,
-                            r0,
-                            (div >> 1) as u8,
-                            (div << 7) as u8,
-                            0,
-                            0,
-                            0,
-                            // MS1 (same as MS0)
-                            0,
-                            1,
-                            r0,
-                            (div >> 1) as u8,
-                            (div << 7) as u8,
-                            0,
-                            0,
-                            0,
-                        ],
-                        [165, 0, div as u8], // PHOFF
-                        [177, 0xa0],         // pll reset
-                        [9, !0b11],          // enable all outputs
+            critical_section::with(|cs| {
+                let mut rc = SHARED_I2CBUS.borrow(cs).borrow_mut();
+                let i2c = rc.as_mut().unwrap();
+                let chunks: &[&[u8]] = &[
+                    &[9, 0xff],        // disable all outputs
+                    &[16, 0xc0, 0xc0], // power down
+                    &[16, 0x4f, 0x4f], // CLK0 power up TODO: drive strength
+                    &[
+                        42,
+                        // MS0 (a = div, b = 0, c = 1)
+                        0,
+                        1,
+                        r0,
+                        (div >> 1) as u8,
+                        (div << 7) as u8,
+                        0,
+                        0,
+                        0,
+                        // MS1 (same as MS0)
+                        0,
+                        1,
+                        r0,
+                        (div >> 1) as u8,
+                        (div << 7) as u8,
+                        0,
+                        0,
+                        0,
                     ],
-                )
-                .map_err(|_| Error::I2cError)?;
-            Ok(())
+                    &[165, 0, div as u8], // PHOFF
+                    &[177, 0xa0],         // pll reset
+                    &[9, !0b11],          // enable all outputs
+                ];
+
+                for chunk in chunks {
+                    i2c.write(Self::I2C_ADDR, chunk)
+                        .map_err(|_| Error::I2cError)?;
+                }
+                Ok(())
+            })
         } else {
             todo!("set phase with hack");
         }
@@ -137,8 +141,10 @@ impl<I2C: I2c> ClockCtl<I2C> {
         let p1: u32 = b * 128 / c - 512;
         let p2: u32 = b * 128 % c;
 
-        self.i2c
-            .write(
+        critical_section::with(|cs| {
+            let mut rc = SHARED_I2CBUS.borrow(cs).borrow_mut();
+            let i2c = rc.as_mut().unwrap();
+            i2c.write(
                 Self::I2C_ADDR,
                 &[
                     0x1a, // MSNA
@@ -153,7 +159,8 @@ impl<I2C: I2c> ClockCtl<I2C> {
                 ],
             )
             .map_err(|_| Error::I2cError)?;
-        Ok(())
+            Ok(())
+        })
     }
 }
 

@@ -1,8 +1,8 @@
 use defmt::*;
 use hal::{Sio, Watchdog};
 
-use crate::hal;
-use hal::{gpio::Pins, pac};
+use crate::{hal, i2c::SHARED_I2CBUS};
+use hal::{fugit::RateExtU32, gpio::Pins, pac};
 
 pub fn main() -> ! {
     info!("Hello, world!");
@@ -32,5 +32,19 @@ pub fn main() -> ! {
         &mut pac.RESETS,
     );
 
+    let i2c = hal::I2C::i2c0(
+        pac.I2C0,
+        pins.gpio0
+            .reconfigure::<hal::gpio::FunctionI2c, hal::gpio::PullUp>(),
+        pins.gpio1
+            .reconfigure::<hal::gpio::FunctionI2c, hal::gpio::PullUp>(),
+        10.kHz(),
+        &mut pac.RESETS,
+        &clocks.system_clock,
+    );
+
+    critical_section::with(|cs| {
+        SHARED_I2CBUS.borrow(cs).replace(Some(i2c));
+    });
     loop {}
 }

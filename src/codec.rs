@@ -1,18 +1,17 @@
 // TLV320AIC3204
 #![allow(dead_code)]
 use crate::hal;
+use crate::i2c::SHARED_I2CBUS;
 use hal::pio::PIOExt;
 use hal::{pac, pio::PIOBuilder};
 
 use crate::board::*;
-use embedded_hal::i2c::{I2c, SevenBitAddress};
+use embedded_hal::i2c::I2c;
 use hal::gpio::{AnyPin, FunctionNull, FunctionPio0, Pin, PullDown, SpecificPin};
-
-use crate::i2c_writes;
 
 type PIODevice = pac::PIO0;
 
-pub struct Codec<I2C: I2c<SevenBitAddress>> {
+pub struct Codec {
     pin_mclk: Pin<PinCodecMclk, FunctionPio0, PullDown>,
     pin_bclk: Pin<PinCodecBclk, FunctionPio0, PullDown>,
     pin_wclk: Pin<PinCodecWclk, FunctionPio0, PullDown>,
@@ -23,15 +22,13 @@ pub struct Codec<I2C: I2c<SevenBitAddress>> {
     _pin_mfp4: Pin<PinCodecMfp4, FunctionNull, PullDown>,
     _pin_mfp5: Pin<PinCodecMfp5, FunctionNull, PullDown>,
 
-    i2c: I2C,
-
     sm_clk: hal::pio::StateMachine<(PIODevice, hal::pio::SM0), hal::pio::Running>,
     sm_i2s: hal::pio::StateMachine<(PIODevice, hal::pio::SM1), hal::pio::Running>,
     sm_i2s_rx: hal::pio::Rx<(PIODevice, hal::pio::SM1)>,
     sm_i2s_tx: hal::pio::Tx<(PIODevice, hal::pio::SM1)>,
 }
 
-impl<I2C: I2c> Codec<I2C> {
+impl Codec {
     pub const I2C_ADDR: u8 = 0b001_1000;
 
     #[allow(clippy::too_many_arguments)]
@@ -53,7 +50,6 @@ impl<I2C: I2c> Codec<I2C> {
         pin_mfp3: SpecificPin<PinMfp3>,
         pin_mfp4: SpecificPin<PinMfp4>,
         pin_mfp5: SpecificPin<PinMfp5>,
-        i2c: I2C,
         pio: PIODevice,
         resets: &mut pac::RESETS,
     ) -> Self {
@@ -129,8 +125,6 @@ impl<I2C: I2c> Codec<I2C> {
             _pin_mfp4: pin_mfp4.into_function().into_pull_type(),
             _pin_mfp5: pin_mfp5.into_function().into_pull_type(),
 
-            i2c,
-
             sm_clk: sm0.start(),
             sm_i2s: sm1.start(),
             sm_i2s_rx: rx,
@@ -140,67 +134,68 @@ impl<I2C: I2c> Codec<I2C> {
 
     pub fn init(&mut self) {
         // init chip
-        self.i2c
-            .transaction(
-                Self::I2C_ADDR,
-                i2c_writes![
-                    // Reset
-                    [0x00, 0x00], // page 0
-                    [0x01, 0x01], // soft reset
-                    // PLL
-                    [0x04, 0x03], // Low Range, from MCLK, to CODEC_CLKIN
-                    [0x05, (0b1 << 7 | 1 << 4 | 1 << 0)], // power up, P = 1, R = 1
-                    [0x06, 4],    // J = 4
-                    [0x07, (9152 >> 8) as u8], // D = 9152
-                    [0x08, (9152 & 0xff) as u8],
-                    [0x1b, 0b11001100], // Interface LJF, 16bit, BCLK out, WCLK out, DOUT no Hi-Z
-                    [0x1c, 0],          // offset 0
-                    [0x1d, 0b00],       // BDIV_CLKIN = DAC_MOD_CLK
-                    [0x1e, 1],          // BCLK DIV 1
-                    [0x1f, 1],
-                    // DAC Clock
-                    [0x0b, 1 << 7 | 2], // NDAC = 2
-                    [0x0c, 1 << 7 | 8], // MDAC = 8
-                    [0x0d, 32 >> 8],    // DOSR = 32
-                    [0x0e, 32],
-                    // setup ADC
-                    [0x12, 0],          // NADC disable; ADC_CLK := DAC_CLK
-                    [0x13, 1 << 7 | 4], // MADC = 4
-                    [0x14, 64],         // AOSR = 64
-                    [0x3d, 0x01],       // ADC PRB_R1 (Filter A, 1 IIR, AGC)
-                    // 3c
-                    [0x00, 0x01], // page 1
-                    [0x01, 0x08], // enable AVdd LDO
-                    [0x02, 0x01], // enable master analog power control ???
-                    // DAC analog blocks
-                    [0x14, 0x25], // HP startup time
-                    [0x0c, 0x08], // DAC to HP
-                    [0x0d, 0x08],
-                    [0x03, 0x00], // DAC PTM_P3/4
-                    [0x04, 0x00],
-                    [0x10, 0x0a], // DAC gain 10dB
-                    [0x11, 0x0a],
-                    [0x09, 0x30], // Power up HPL/HPR
-                    // ADC analog
-                    [0x0a, 0x00],       // input common mode 0.9V
-                    [0x3d, 0x00],       // select ADC PTM_R4
-                    [0x47, 0x32],       // MicPGA startup delay 3.1ms
-                    [0x7b, 0x01],       // REF charging 40ms
-                    [0x34, 0x10],       // Route IN2L to LEFT_P with 10K
-                    [0x36, 0x10],       // Route IN2R to LEFT_N with 10k
-                    [0x37, 0x40],       // Route IN1R to RIGHT_P with 10k
-                    [0x39, 0x10],       // Route IN1L to RIGHT_N with 10k
-                    [0x3b, 72],         // L MICPGA: unmute, 32dB // なわけない
-                    [0x3c, 72],         // R MICPGA: same as L
-                    [0x00, 0x00],       // page 0
-                    [0x3f, 0b11010100], // powerup LR DAC
-                    [0x40, 0b00000000], // unmute dac digial volume
-                    [0x51, 0b11000000], // powerup LR ADC
-                    [0x52, 0b00000000], // unmute adc digial volume
-                                        // TODO: AGC
-                ],
-            )
-            .unwrap();
+        critical_section::with(|cs| {
+            let mut rc = SHARED_I2CBUS.borrow(cs).borrow_mut();
+            let i2c = rc.as_mut().unwrap();
+            let chunks = &[
+                // Reset
+                &[0x00, 0x00], // page 0
+                &[0x01, 0x01], // soft reset
+                // PLL
+                &[0x04, 0x03], // Low Range, from MCLK, to CODEC_CLKIN
+                &[0x05, (0b1 << 7 | 1 << 4 | 1 << 0)], // power up, P = 1, R = 1
+                &[0x06, 4],    // J = 4
+                &[0x07, (9152 >> 8) as u8], // D = 9152
+                &[0x08, (9152 & 0xff) as u8],
+                &[0x1b, 0b11001100], // Interface LJF, 16bit, BCLK out, WCLK out, DOUT no Hi-Z
+                &[0x1c, 0],          // offset 0
+                &[0x1d, 0b00],       // BDIV_CLKIN = DAC_MOD_CLK
+                &[0x1e, 1],          // BCLK DIV 1
+                &[0x1f, 1],
+                // DAC Clock
+                &[0x0b, 1 << 7 | 2], // NDAC = 2
+                &[0x0c, 1 << 7 | 8], // MDAC = 8
+                &[0x0d, 32 >> 8],    // DOSR = 32
+                &[0x0e, 32],
+                // setup ADC
+                &[0x12, 0],          // NADC disable; ADC_CLK := DAC_CLK
+                &[0x13, 1 << 7 | 4], // MADC = 4
+                &[0x14, 64],         // AOSR = 64
+                &[0x3d, 0x01],       // ADC PRB_R1 (Filter A, 1 IIR, AGC)
+                // 3c
+                &[0x00, 0x01], // page 1
+                &[0x01, 0x08], // enable AVdd LDO
+                &[0x02, 0x01], // enable master analog power control ???
+                // DAC analog blocks
+                &[0x14, 0x25], // HP startup time
+                &[0x0c, 0x08], // DAC to HP
+                &[0x0d, 0x08],
+                &[0x03, 0x00], // DAC PTM_P3/4
+                &[0x04, 0x00],
+                &[0x10, 0x0a], // DAC gain 10dB
+                &[0x11, 0x0a],
+                &[0x09, 0x30], // Power up HPL/HPR
+                // ADC analog
+                &[0x0a, 0x00],       // input common mode 0.9V
+                &[0x3d, 0x00],       // select ADC PTM_R4
+                &[0x47, 0x32],       // MicPGA startup delay 3.1ms
+                &[0x7b, 0x01],       // REF charging 40ms
+                &[0x34, 0x10],       // Route IN2L to LEFT_P with 10K
+                &[0x36, 0x10],       // Route IN2R to LEFT_N with 10k
+                &[0x37, 0x40],       // Route IN1R to RIGHT_P with 10k
+                &[0x39, 0x10],       // Route IN1L to RIGHT_N with 10k
+                &[0x3b, 72],         // L MICPGA: unmute, 32dB // なわけない
+                &[0x3c, 72],         // R MICPGA: same as L
+                &[0x00, 0x00],       // page 0
+                &[0x3f, 0b11010100], // powerup LR DAC
+                &[0x40, 0b00000000], // unmute dac digial volume
+                &[0x51, 0b11000000], // powerup LR ADC
+                &[0x52, 0b00000000], // unmute adc digial volume
+            ];
+            for chunk in chunks {
+                i2c.write(Self::I2C_ADDR, *chunk).unwrap();
+            }
+        });
 
         // setup DMA
     }
