@@ -5,9 +5,10 @@ use rp2040_hal::fugit::HertzU32;
 
 const XTAL_FREQ: HertzU32 = HertzU32::MHz(25_u32);
 
-pub struct ClockCtl {
+pub struct ClockCtl<Alarm: rp2040_hal::timer::Alarm> {
+    alarm: Alarm,
     current_freq: HertzU32,
-    current_tune_factors: TuneFactors,
+    current_div_idx: usize,
 }
 
 pub enum Error {
@@ -16,24 +17,25 @@ pub enum Error {
     InvalidValue,
 }
 
-impl core::fmt::Debug for Error {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str(match self {
-            Self::I2cError => "I2C error",
-            Self::DeviceInInitialization => "Device in initialization",
-            Self::InvalidValue => "Invalid value",
-        })
+impl defmt::Format for Error {
+    fn format(&self, fmt: defmt::Formatter) {
+        match self {
+            Self::I2cError => defmt::write!(fmt, "I2C error"),
+            Self::DeviceInInitialization => defmt::write!(fmt, "Device in initialization"),
+            Self::InvalidValue => defmt::write!(fmt, "Invalid value"),
+        }
     }
 }
 
-impl ClockCtl {
+impl<Alarm: rp2040_hal::timer::Alarm> ClockCtl<Alarm> {
     pub const I2C_ADDR: u8 = 0b110_0000;
     pub const XTAL_FREQ: HertzU32 = XTAL_FREQ;
 
-    pub fn new() -> Self {
+    pub fn new(alarm: Alarm) -> Self {
         Self {
+            alarm,
             current_freq: HertzU32::MHz(0),
-            current_tune_factors: TUNE_FACTORS[0],
+            current_div_idx: 0,
         }
     }
 
@@ -66,46 +68,37 @@ impl ClockCtl {
         })
     }
 
-    pub const fn make_clk_control(
-        powered: bool,
-        division_integer: bool, // 1: integer, 0: fractional
-        source_b: bool,         // 0: PLLA, 1: PLLB
-        invert: bool,
-    ) -> u8 {
-        (!powered as u8) << 7
-            | (division_integer as u8) << 6
-            | (source_b as u8) << 5
-            | (invert as u8) << 4
-            | 0b1111
-    }
-
     pub fn get_current_freq(&self) -> HertzU32 {
         self.current_freq
     }
 
+    fn get_tune_factors(&self) -> &TuneFactors {
+        &TUNE_FACTORS[self.current_div_idx]
+    }
+
     pub fn tune(&mut self, target: HertzU32) -> Result<(), Error> {
         self.current_freq = target;
-        let a = self.current_tune_factors.get_synth_param(target);
+        let a = self.get_tune_factors().get_synth_param(target);
         if a != 0 {
             // just set pll
-            self.set_plla_mul(a, self.current_tune_factors.c)?;
+            self.set_plla_mul(a, self.get_tune_factors().c)?;
         } else {
             // change div
-            self.current_tune_factors =
-                TUNE_FACTORS[find_div_idx(target).ok_or(Error::InvalidValue)?];
-            self.set_div(self.current_tune_factors.div)?;
-            let a = self.current_tune_factors.get_synth_param(target);
-            self.set_plla_mul(a, self.current_tune_factors.c)?;
+            self.current_div_idx = find_div_idx(target).ok_or(Error::InvalidValue)?;
+            self.set_div()?;
+            let a = self.get_tune_factors().get_synth_param(target);
+            self.set_plla_mul(a, self.get_tune_factors().c)?;
         }
 
         Ok(())
     }
 
-    fn set_div(&mut self, div: u32) -> Result<(), Error> {
+    fn set_div(&mut self) -> Result<(), Error> {
+        let div = self.get_tune_factors().div;
         defmt::info!("setting div {}", div);
         if div <= 127 {
             let p1 = div - 4;
-            let r0 = if div == 4 { 0b11 << 2 } else { (p1 >> 9) as u8 };
+            let r0 = if div == 4 { 0b11 << 2 } else { 0 };
             critical_section::with(|cs| {
                 let mut rc = SHARED_I2CBUS.borrow(cs).borrow_mut();
                 let i2c = rc.as_mut().unwrap();
@@ -144,12 +137,82 @@ impl ClockCtl {
                         .map_err(|_| Error::I2cError)?;
                 }
                 Ok(())
-            })
+            })?;
         } else {
-            // todo!("set phase with hack");
-            defmt::info!("not implemented. ignoring");
-            Ok(())
+            // hacky way to set phase offset
+            // special thanks: https://tj-lab.org/2020/08/27/si5351%e5%8d%98%e4%bd%93%e3%81%a73mhz%e4%bb%a5%e4%b8%8b%e3%81%ae%e7%9b%b4%e4%ba%a4%e4%bf%a1%e5%8f%b7%e3%82%92%e5%87%ba%e5%8a%9b%e3%81%99%e3%82%8b/
+            // T = 1 / 16Hz / 4 = 62.5ms
+            let p1 = div * 128 - 512;
+            let div1 = &TUNE_FINE_QUAD[self.current_div_idx];
+            self.alarm.cancel().unwrap();
+            self.alarm
+                .schedule(rp2040_hal::fugit::ExtU32::micros(62500_u32))
+                .unwrap();
+            critical_section::with(|cs| {
+                let mut rc = SHARED_I2CBUS.borrow(cs).borrow_mut();
+                let i2c = rc.as_mut().unwrap();
+                let chunks: &[&[u8]] = &[
+                    &[3, 0xff],        // disable all outputs
+                    &[16, 0x80, 0x80], // power down
+                    // set PLL 24x
+                    &[26, 0, 1, 0, (20 << 7 >> 8) as u8, (20 << 7) as u8, 0, 0, 0], // MSNA: P1 = 20*128, P2 = 0, P3 = 1
+                    &[
+                        42,
+                        // MS0
+                        0,
+                        1,
+                        (p1 >> 16) as u8,
+                        (p1 >> 8) as u8,
+                        p1 as u8,
+                        0,
+                        0,
+                        0,
+                        // MS1 (P1 = p1 | div1[0]>>24, P2 = div1[0] & 0xffffff, P3 = div1[1])
+                        (div1[1] >> 8) as u8,
+                        div1[1] as u8,
+                        (p1 >> 16) as u8,
+                        (p1 >> 8) as u8,
+                        p1 as u8 | (div1[0] >> 24) as u8,
+                        (div1[1] >> 16 << 4) as u8 | ((div1[0] & 0xff0000) >> 16) as u8,
+                        (div1[0] >> 8) as u8,
+                        div1[0] as u8,
+                    ],
+                    &[165, 0, 0],      // PHOFF
+                    &[177, 0xa0],      // pll reset
+                    &[16, 0x4f, 0x4f], // CLK0 power up TODO: drive strength
+                    &[3, 0b00],        // enable all outputs
+                ];
+
+                for chunk in chunks {
+                    i2c.write(Self::I2C_ADDR, chunk)
+                        .map_err(|_| Error::I2cError)?;
+                }
+                Ok(())
+            })?;
+            while !self.alarm.finished() {}
+            critical_section::with(|cs| {
+                let mut rc = SHARED_I2CBUS.borrow(cs).borrow_mut();
+                let i2c = rc.as_mut().unwrap();
+                let chunks: &[&[u8]] = &[&[
+                    50,
+                    // reset MS1 (P1 = div * 128 - 512, P2 = 0, P3 = 1)
+                    0,
+                    1,
+                    (p1 >> 16) as u8,
+                    (p1 >> 8) as u8,
+                    p1 as u8,
+                    0,
+                    0,
+                    0,
+                ]];
+                for chunk in chunks {
+                    i2c.write(Self::I2C_ADDR, chunk)
+                        .map_err(|_| Error::I2cError)?;
+                }
+                Ok(())
+            })?;
         }
+        Ok(())
     }
 
     fn set_plla_mul(&mut self, b: u32, c: u32) -> Result<(), Error> {
@@ -217,6 +280,40 @@ const TUNE_FACTORS: [TuneFactors; 27] = [
     TuneFactors::new_div(1250,  1, 1),
     TuneFactors::new_div(1600,  1, 1),
     TuneFactors::new_div(1800,  1, 9),
+];
+
+// constants to make 4hz difference.
+// P1 = [0] >> 24 + (div * 128 - 512)
+// P2 = [0] & 0xffffff
+// P3 = [1]
+const TUNE_FINE_QUAD: [[u32; 2]; 27] = [
+    [0, 0],
+    [0, 0],
+    [0, 0],
+    [0, 0],
+    [0, 0],
+    [0, 0],
+    [0, 0],
+    [0, 0],
+    [0, 0],
+    [0, 0],
+    [0, 0],
+    [0, 0],
+    [0, 0],
+    [0, 0],
+    [0, 0],
+    [20480, 937499],
+    [25600, 749999],
+    [32000, 599999],
+    [40960, 468749],
+    [51200, 374999],
+    [64000, 299999],
+    [40960, 117187],
+    [102400, 187499],
+    [128000, 149999],
+    [1 << 24 | 40001, 119999],
+    [2 << 24 | 17302, 93749],
+    [2 << 24 | 191206, 249997],
 ];
 
 // find optimal DIV for the target frequency
