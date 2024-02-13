@@ -18,8 +18,8 @@ pub type PinSdMosi = Gpio11;
 pub type PinSdMiso = Gpio12;
 pub type PinSdCs = Gpio13;
 
-// gpio14 unused
-
+pub type LcdSpiDevice = hal::pac::SPI0;
+pub type PinLcdReset = Gpio14;
 pub type PinLcdTouchIrq = Gpio15;
 pub type PinLcdMiso = Gpio16;
 pub type PinLcdTouchCs = Gpio17;
