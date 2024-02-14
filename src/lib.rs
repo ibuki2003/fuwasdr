@@ -14,3 +14,4 @@ pub mod core;
 pub mod dsp;
 pub mod i2c;
 pub mod util;
+pub mod control;
