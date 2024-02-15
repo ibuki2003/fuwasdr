@@ -213,7 +213,55 @@ impl Codec {
         // setup DMA
     }
 
-    pub fn update_dma(&mut self) {}
+    pub fn read_sample(&mut self) -> Option<(u16, u16)> {
+        self.sm_i2s_rx.read()
+            // .map(|v| unsafe { *(&v as *const u32 as *const DSPComplex) })
+            .map(|v| {
+                let re = (v & 0xffff) as u16;
+                let im = ((v >> 16) & 0xffff) as u16;
+                (re, im)
+            })
+    }
+
+    pub fn try_write_sample(&mut self, v: DSPComplex) -> bool {
+        self.sm_i2s_tx.write(unsafe { *(&v as *const DSPComplex as *const u32) })
+    }
+
+    pub fn set_agc_target(&mut self, v: u8) {
+        critical_section::with(|cs| {
+            let mut rc = SHARED_I2CBUS.borrow(cs).borrow_mut();
+            let i2c = rc.as_mut().unwrap();
+            let vv = 0b10000011 | ((v & 0b111) << 4);
+            i2c.write(Self::I2C_ADDR, &[0x00, 0x00]).unwrap();
+            i2c.write(Self::I2C_ADDR, &[0x56, vv]).unwrap();
+            i2c.write(Self::I2C_ADDR, &[0x5e, vv]).unwrap();
+        });
+    }
+
+    pub fn set_volume(&mut self, v: i8) {
+        critical_section::with(|cs| {
+            let mut rc = SHARED_I2CBUS.borrow(cs).borrow_mut();
+            let i2c = rc.as_mut().unwrap();
+            let vv = (v as u8) >> 1;
+            i2c.write(Self::I2C_ADDR, &[0x00, 0x00]).unwrap();
+            i2c.write(Self::I2C_ADDR, &[0x53, vv]).unwrap();
+            i2c.write(Self::I2C_ADDR, &[0x54, vv]).unwrap();
+        });
+    }
+
+    pub fn get_agc_gain(&mut self) -> (u8, u8) {
+        critical_section::with(|cs| {
+            let mut rc = SHARED_I2CBUS.borrow(cs).borrow_mut();
+            let i2c = rc.as_mut().unwrap();
+            let mut buf = [0; 2];
+            i2c.write(Self::I2C_ADDR, &[0x00, 0x00]).unwrap();
+            i2c.write_read(Self::I2C_ADDR, &[0x5d], &mut buf[0..1])
+                .unwrap();
+            i2c.write_read(Self::I2C_ADDR, &[0x65], &mut buf[1..2])
+                .unwrap();
+            (buf[0], buf[1])
+        })
+    }
 }
 
 /*
