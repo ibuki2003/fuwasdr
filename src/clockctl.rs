@@ -126,7 +126,7 @@ impl<Alarm: rp2040_hal::timer::Alarm> ClockCtl<Alarm> {
                         0,
                         0,
                     ],
-                    &[165, 0, div as u8], // PHOFF
+                    &[165, div as u8, 0], // PHOFF
                     &[177, 0xa0],         // pll reset
                     &[16, 0x4f, 0x4f],    // CLK0 power up TODO: drive strength
                     &[3, 0b00],           // enable all outputs
@@ -158,16 +158,7 @@ impl<Alarm: rp2040_hal::timer::Alarm> ClockCtl<Alarm> {
                     &[26, 0, 1, 0, (20 << 7 >> 8) as u8, (20 << 7) as u8, 0, 0, 0], // MSNA: P1 = 20*128, P2 = 0, P3 = 1
                     &[
                         42,
-                        // MS0
-                        0,
-                        1,
-                        (p1 >> 16) as u8,
-                        (p1 >> 8) as u8,
-                        p1 as u8,
-                        0,
-                        0,
-                        0,
-                        // MS1 (P1 = p1 | div1[0]>>24, P2 = div1[0] & 0xffffff, P3 = div1[1])
+                        // MS0: delta 4Hz (P1 = p1 | div1[0]>>24, P2 = div1[0] & 0xffffff, P3 = div1[1])
                         (div1[1] >> 8) as u8,
                         div1[1] as u8,
                         (p1 >> 16) as u8,
@@ -176,6 +167,15 @@ impl<Alarm: rp2040_hal::timer::Alarm> ClockCtl<Alarm> {
                         (div1[1] >> 16 << 4) as u8 | ((div1[0] & 0xff0000) >> 16) as u8,
                         (div1[0] >> 8) as u8,
                         div1[0] as u8,
+                        // MS1: normal
+                        0,
+                        1,
+                        (p1 >> 16) as u8,
+                        (p1 >> 8) as u8,
+                        p1 as u8,
+                        0,
+                        0,
+                        0,
                     ],
                     &[165, 0, 0],      // PHOFF
                     &[177, 0xa0],      // pll reset
@@ -194,8 +194,8 @@ impl<Alarm: rp2040_hal::timer::Alarm> ClockCtl<Alarm> {
                 let mut rc = SHARED_I2CBUS.borrow(cs).borrow_mut();
                 let i2c = rc.as_mut().unwrap();
                 let chunks: &[&[u8]] = &[&[
-                    50,
-                    // reset MS1 (P1 = div * 128 - 512, P2 = 0, P3 = 1)
+                    42,
+                    // reset MS0 (P1 = div * 128 - 512, P2 = 0, P3 = 1)
                     0,
                     1,
                     (p1 >> 16) as u8,
