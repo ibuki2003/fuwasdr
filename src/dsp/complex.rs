@@ -3,6 +3,7 @@ use super::number::DSPNum;
 use auto_ops::impl_op_ex;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+#[repr(C, align(4))]
 pub struct DSPComplex {
     pub re: DSPNum,
     pub im: DSPNum,
@@ -26,6 +27,19 @@ impl_op_ex!(*|a: &DSPComplex, b: &DSPComplex| -> DSPComplex {
     }
 });
 
+impl_op_ex!(<< |a: &DSPComplex, b: u16| -> DSPComplex {
+    DSPComplex {
+        re: a.re << b,
+        im: a.im << b,
+    }
+});
+impl_op_ex!(>> |a: &DSPComplex, b: u16| -> DSPComplex {
+    DSPComplex {
+        re: a.re >> b,
+        im: a.im >> b,
+    }
+});
+
 impl_op_ex!(-|a: &DSPComplex| -> DSPComplex {
     DSPComplex {
         re: -a.re,
@@ -38,6 +52,10 @@ impl_op_ex!(-= |a: &mut DSPComplex, b: DSPComplex| { a.re -= b.re; a.im -= b.im 
 impl_op_ex!(*= |a: &mut DSPComplex, b: DSPComplex| { *a = *a * b });
 
 impl DSPComplex {
+    pub const fn zero() -> DSPComplex { DSPComplex { re: DSPNum(0), im: DSPNum(0), } }
+    pub const fn one() -> DSPComplex { DSPComplex { re: DSPNum(1), im: DSPNum(0), } }
+    pub const fn i() -> DSPComplex { DSPComplex { re: DSPNum(0), im: DSPNum(1), } }
+
     pub const fn from_i16(re: i16, im: i16) -> DSPComplex {
         DSPComplex {
             re: DSPNum(re),
@@ -114,6 +132,13 @@ impl DSPComplex {
             }
         }
     }
+
+    pub fn norm(&self) -> DSPNum {
+        let re = self.re.0 as i32;
+        let im = self.im.0 as i32;
+        DSPNum(((re * re + im * im) >> (DSPNum::FIXED_POINT)) as i16)
+    }
+
 }
 
 const COSSIN_TABLE: [DSPComplex; 16] = [

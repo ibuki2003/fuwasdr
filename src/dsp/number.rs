@@ -11,6 +11,9 @@ impl_op_ex!(+ |a: &DSPNum, b: &DSPNum| -> DSPNum { DSPNum(a.0 + b.0) });
 impl_op_ex!(-|a: &DSPNum, b: &DSPNum| -> DSPNum { DSPNum(a.0 - b.0) });
 impl_op_ex!(*|a: &DSPNum, b: &DSPNum| -> DSPNum { DSPNum(unshift_fpmul(a.0 as i32 * b.0 as i32)) });
 
+impl_op_ex!(<< |a: &DSPNum, b: u16| -> DSPNum { DSPNum(a.0 << b) });
+impl_op_ex!(>> |a: &DSPNum, b: u16| -> DSPNum { DSPNum(a.0 >> b) });
+
 impl_op_ex!(-|a: &DSPNum| -> DSPNum { DSPNum(-a.0) });
 
 impl_op_ex!(+= |a: &mut DSPNum, b: DSPNum| { a.0 += b.0 });
