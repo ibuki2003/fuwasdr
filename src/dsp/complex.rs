@@ -52,9 +52,24 @@ impl_op_ex!(-= |a: &mut DSPComplex, b: DSPComplex| { a.re -= b.re; a.im -= b.im 
 impl_op_ex!(*= |a: &mut DSPComplex, b: DSPComplex| { *a = *a * b });
 
 impl DSPComplex {
-    pub const fn zero() -> DSPComplex { DSPComplex { re: DSPNum(0), im: DSPNum(0), } }
-    pub const fn one() -> DSPComplex { DSPComplex { re: DSPNum(1), im: DSPNum(0), } }
-    pub const fn i() -> DSPComplex { DSPComplex { re: DSPNum(0), im: DSPNum(1), } }
+    pub const fn zero() -> DSPComplex {
+        DSPComplex {
+            re: DSPNum(0),
+            im: DSPNum(0),
+        }
+    }
+    pub const fn one() -> DSPComplex {
+        DSPComplex {
+            re: DSPNum(1 << DSPNum::FIXED_POINT),
+            im: DSPNum(0),
+        }
+    }
+    pub const fn i() -> DSPComplex {
+        DSPComplex {
+            re: DSPNum(0),
+            im: DSPNum(1 << DSPNum::FIXED_POINT),
+        }
+    }
 
     pub const fn from_i16(re: i16, im: i16) -> DSPComplex {
         DSPComplex {
@@ -63,10 +78,10 @@ impl DSPComplex {
         }
     }
 
-    pub fn conj(&self) -> DSPComplex {
+    pub const fn conj(&self) -> DSPComplex {
         DSPComplex {
             re: self.re,
-            im: -self.im,
+            im: DSPNum(-self.im.0),
         }
     }
 
@@ -139,6 +154,28 @@ impl DSPComplex {
         DSPNum(((re * re + im * im) >> (DSPNum::FIXED_POINT)) as i16)
     }
 
+    // arr[i] = expi(i/128 * pi).conj()
+    pub fn make_sequential_expi(arr: &mut [DSPComplex; 128]) {
+        arr[0] = DSPComplex::one();
+        arr[64] = DSPComplex::i().conj();
+        for i in 0..6 {
+            arr[1 << i] = COSSIN_TABLE[5 - i].conj();
+        }
+
+        let mut d = 2;
+        for i in 3..128 {
+            if is_power_of_two(i) {
+                d <<= 1;
+            } else {
+                let j = i & !d;
+                arr[i] = arr[j] * arr[d];
+            }
+        }
+    }
+}
+
+const fn is_power_of_two(x: usize) -> bool {
+    x & (x - 1) == 0
 }
 
 const COSSIN_TABLE: [DSPComplex; 16] = [
