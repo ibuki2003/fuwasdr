@@ -7,20 +7,19 @@ use hal::{pac, pio::PIOBuilder};
 
 use crate::board::*;
 use embedded_hal::i2c::I2c;
-use hal::gpio::{FunctionNull, FunctionPio0, Pin, PullDown, PullNone};
 
 type PIODevice = pac::PIO0;
 
 pub struct Codec {
-    pin_mclk: Pin<PinCodecMclk, FunctionPio0, PullNone>,
-    pin_bclk: Pin<PinCodecBclk, FunctionPio0, PullNone>,
-    pin_wclk: Pin<PinCodecWclk, FunctionPio0, PullNone>,
+    pin_mclk: PinCodecMclk,
+    pin_bclk: PinCodecBclk,
+    pin_wclk: PinCodecWclk,
 
-    pin_din: Pin<PinCodecMfp1, FunctionPio0, PullNone>,
-    pin_dout: Pin<PinCodecMfp2, FunctionPio0, PullNone>,
-    _pin_mfp3: Pin<PinCodecMfp3, FunctionNull, PullNone>,
-    _pin_mfp4: Pin<PinCodecMfp4, FunctionNull, PullNone>,
-    _pin_mfp5: Pin<PinCodecMfp5, FunctionNull, PullNone>,
+    pin_din: PinCodecMfp1,
+    pin_dout: PinCodecMfp2,
+    _pin_mfp3: PinCodecMfp3,
+    _pin_mfp4: PinCodecMfp4,
+    _pin_mfp5: PinCodecMfp5,
 
     sm_clk: hal::pio::StateMachine<(PIODevice, hal::pio::SM0), hal::pio::Running>,
     sm_i2s: hal::pio::StateMachine<(PIODevice, hal::pio::SM1), hal::pio::Running>,
@@ -33,14 +32,14 @@ impl Codec {
 
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        pin_mclk: Pin<PinCodecMclk, FunctionNull, PullDown>,
-        pin_bclk: Pin<PinCodecBclk, FunctionNull, PullDown>,
-        pin_wclk: Pin<PinCodecWclk, FunctionNull, PullDown>,
-        pin_mfp1: Pin<PinCodecMfp1, FunctionNull, PullDown>,
-        pin_mfp2: Pin<PinCodecMfp2, FunctionNull, PullDown>,
-        pin_mfp3: Pin<PinCodecMfp3, FunctionNull, PullDown>,
-        pin_mfp4: Pin<PinCodecMfp4, FunctionNull, PullDown>,
-        pin_mfp5: Pin<PinCodecMfp5, FunctionNull, PullDown>,
+        pin_mclk: PinCodecMclk,
+        pin_bclk: PinCodecBclk,
+        pin_wclk: PinCodecWclk,
+        pin_mfp1: PinCodecMfp1,
+        pin_mfp2: PinCodecMfp2,
+        pin_mfp3: PinCodecMfp3,
+        pin_mfp4: PinCodecMfp4,
+        pin_mfp5: PinCodecMfp5,
         pio: PIODevice,
         resets: &mut pac::RESETS,
     ) -> Self {
@@ -111,15 +110,15 @@ impl Codec {
         ]);
 
         Self {
-            pin_mclk: pin_mclk.reconfigure(),
-            pin_bclk: pin_bclk.reconfigure(),
-            pin_wclk: pin_wclk.reconfigure(),
+            pin_mclk,
+            pin_bclk,
+            pin_wclk,
 
-            pin_din: pin_din.reconfigure(),
-            pin_dout: pin_dout.reconfigure(),
-            _pin_mfp3: pin_mfp3.reconfigure(),
-            _pin_mfp4: pin_mfp4.reconfigure(),
-            _pin_mfp5: pin_mfp5.reconfigure(),
+            pin_din,
+            pin_dout,
+            _pin_mfp3: pin_mfp3,
+            _pin_mfp4: pin_mfp4,
+            _pin_mfp5: pin_mfp5,
 
             sm_clk: sm_clk.start(),
             sm_i2s: sm_i2s.start(),
@@ -214,7 +213,8 @@ impl Codec {
     }
 
     pub fn read_sample(&mut self) -> Option<(u16, u16)> {
-        self.sm_i2s_rx.read()
+        self.sm_i2s_rx
+            .read()
             // .map(|v| unsafe { *(&v as *const u32 as *const DSPComplex) })
             .map(|v| {
                 let re = (v & 0xffff) as u16;
@@ -224,7 +224,8 @@ impl Codec {
     }
 
     pub fn try_write_sample(&mut self, v: DSPComplex) -> bool {
-        self.sm_i2s_tx.write(unsafe { *(&v as *const DSPComplex as *const u32) })
+        self.sm_i2s_tx
+            .write(unsafe { *(&v as *const DSPComplex as *const u32) })
     }
 
     pub fn set_agc_target(&mut self, v: u8) {

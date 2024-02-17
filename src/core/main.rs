@@ -1,7 +1,7 @@
 use defmt::*;
-use hal::{fugit::RateExtU32, gpio::Pins, pac, Clock, Sio, Timer, Watchdog};
+use hal::{fugit::RateExtU32, pac, Clock, Sio, Timer, Watchdog};
 
-use crate::{hal, i2c::SHARED_I2CBUS};
+use crate::{board, hal, i2c::SHARED_I2CBUS};
 
 const USBBUF_LEN: usize = 192;
 static mut USBBUF0: [u8; USBBUF_LEN * 4 * 2] = [0; USBBUF_LEN * 4 * 2];
@@ -28,7 +28,7 @@ pub fn main() -> ! {
     .unwrap();
 
     let sio = Sio::new(pac.SIO);
-    let pins = Pins::new(
+    let pins = board::Pins::new(
         pac.IO_BANK0,
         pac.PADS_BANK0,
         sio.gpio_bank0,
@@ -40,9 +40,9 @@ pub fn main() -> ! {
     // init shared i2c
     let i2c = hal::I2C::i2c0(
         pac.I2C0,
-        pins.gpio0
+        pins.i2c_sda
             .reconfigure::<hal::gpio::FunctionI2c, hal::gpio::PullUp>(),
-        pins.gpio1
+        pins.i2c_scl
             .reconfigure::<hal::gpio::FunctionI2c, hal::gpio::PullUp>(),
         100.kHz(),
         &mut pac.RESETS,
@@ -67,17 +67,17 @@ pub fn main() -> ! {
         .tune(81300.kHz())
         .unwrap_or_else(|e| info!("Failed to tune: {}", e));
 
-    crate::control::init(pins.gpio22.reconfigure(), pins.gpio26.reconfigure());
+    crate::control::init(pins.rotary_a.reconfigure(), pins.rotary_b.reconfigure());
 
     let mut codec = crate::codec::Codec::new(
-        pins.gpio2,
-        pins.gpio3,
-        pins.gpio4,
-        pins.gpio5,
-        pins.gpio6,
-        pins.gpio7,
-        pins.gpio8,
-        pins.gpio9,
+        pins.codec_mclk.reconfigure(),
+        pins.codec_bclk.reconfigure(),
+        pins.codec_wclk.reconfigure(),
+        pins.codec_mfp1.reconfigure(),
+        pins.codec_mfp2.reconfigure(),
+        pins.codec_mfp3.reconfigure(),
+        pins.codec_mfp4.reconfigure(),
+        pins.codec_mfp5.reconfigure(),
         pac.PIO0,
         &mut pac.RESETS,
     );
@@ -86,14 +86,14 @@ pub fn main() -> ! {
 
     let mut display = crate::display::Manager::new(crate::display::LcdDisplay::new(
         pac.SPI0,
-        pins.gpio14,
-        pins.gpio15,
-        pins.gpio16,
-        pins.gpio17,
-        pins.gpio18,
-        pins.gpio19,
-        pins.gpio20,
-        pins.gpio21,
+        pins.lcd_reset.reconfigure(),
+        pins.lcd_touchirq.reconfigure(),
+        pins.lcd_miso.reconfigure(),
+        pins.lcd_touchcs.reconfigure(),
+        pins.lcd_sck.reconfigure(),
+        pins.lcd_mosi.reconfigure(),
+        pins.lcd_dispcs.reconfigure(),
+        pins.lcd_dcrs.reconfigure(),
         &mut pac.RESETS,
         clocks.system_clock.freq(),
     ));

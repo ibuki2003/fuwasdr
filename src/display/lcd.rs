@@ -16,43 +16,39 @@ const LCD_HEIGHT: u16 = 240;
 type LcdSpi = hal::spi::Spi<
     hal::spi::Enabled,
     LcdSpiDevice,
-    (
-        hal::gpio::Pin<PinLcdMosi, hal::gpio::FunctionSpi, hal::gpio::PullNone>,
-        hal::gpio::Pin<PinLcdMiso, hal::gpio::FunctionSpi, hal::gpio::PullDown>,
-        hal::gpio::Pin<PinLcdSck, hal::gpio::FunctionSpi, hal::gpio::PullNone>,
-    ),
+    (PinLcdMosi, PinLcdMiso, PinLcdSck),
     8,
 >;
 pub struct LcdDisplay {
     spi: LcdSpi,
-    pin_dc: Pin<PinLcdDcRs, FunctionSioOutput, PullNone>,
-    pin_reset: Pin<PinLcdReset, FunctionSioOutput, PullNone>,
-    pin_tourhirq: Pin<PinLcdTouchIrq, FunctionSioInput, PullUp>,
-    pin_touchcs: Pin<PinLcdTouchCs, FunctionSioOutput, PullNone>,
-    pin_dispcs: Pin<PinLcdDispCs, FunctionSioOutput, PullNone>,
+    pin_dc: PinLcdDcRs,
+    pin_reset: PinLcdReset,
+    pin_tourhirq: PinLcdTouchIrq,
+    pin_touchcs: PinLcdTouchCs,
+    pin_dispcs: PinLcdDispCs,
 }
 
 impl LcdDisplay {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         spidev: LcdSpiDevice,
-        pin_reset: Pin<PinLcdReset, FunctionNull, PullDown>,
-        pin_tourhirq: Pin<PinLcdTouchIrq, FunctionNull, PullDown>,
-        pin_miso: Pin<PinLcdMiso, FunctionNull, PullDown>,
-        pin_touchcs: Pin<PinLcdTouchCs, FunctionNull, PullDown>,
-        pin_sck: Pin<PinLcdSck, FunctionNull, PullDown>,
-        pin_mosi: Pin<PinLcdMosi, FunctionNull, PullDown>,
-        pin_dispcs: Pin<PinLcdDispCs, FunctionNull, PullDown>,
-        pin_dc: Pin<PinLcdDcRs, FunctionNull, PullDown>,
+        pin_reset: PinLcdReset,
+        pin_tourhirq: PinLcdTouchIrq,
+        pin_miso: PinLcdMiso,
+        pin_touchcs: PinLcdTouchCs,
+        pin_sck: PinLcdSck,
+        pin_mosi: PinLcdMosi,
+        pin_dispcs: PinLcdDispCs,
+        pin_dc: PinLcdDcRs,
         resets: &mut hal::pac::RESETS,
         peripheral_clock: HertzU32,
     ) -> Self {
         let spi = hal::spi::Spi::new(
             spidev,
             (
-                pin_mosi.reconfigure(),
-                pin_miso.reconfigure(),
-                pin_sck.reconfigure(),
+                pin_mosi,
+                pin_miso,
+                pin_sck,
             ),
         )
         .init(
@@ -63,11 +59,11 @@ impl LcdDisplay {
         );
         Self {
             spi,
-            pin_dc: pin_dc.reconfigure(),
-            pin_reset: pin_reset.reconfigure(),
-            pin_tourhirq: pin_tourhirq.reconfigure(),
-            pin_touchcs: pin_touchcs.reconfigure(),
-            pin_dispcs: pin_dispcs.reconfigure(),
+            pin_dc,
+            pin_reset,
+            pin_tourhirq,
+            pin_touchcs,
+            pin_dispcs,
         }
     }
 

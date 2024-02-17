@@ -5,18 +5,14 @@ use hal::{
     gpio::Interrupt::{EdgeHigh, EdgeLow},
     pac::{self, interrupt},
 };
-use rp2040_hal::gpio::{FunctionSioInput, Pin, PullUp};
 
 // // NOTE: output B is unstable, so we need to use input A for interrupt
-static mut PIN_ROT_A: Option<Pin<PinRotaryA, FunctionSioInput, PullUp>> = None;
-static mut PIN_ROT_B: Option<Pin<PinRotaryB, FunctionSioInput, PullUp>> = None;
+static mut PIN_ROT_A: Option<PinRotaryA> = None;
+static mut PIN_ROT_B: Option<PinRotaryB> = None;
 static mut ROT_STATE: u8 = 3;
 static mut ROT_COUNT: i32 = 0;
 
-pub fn init(
-    pin_rot_a: Pin<PinRotaryA, FunctionSioInput, PullUp>,
-    pin_rot_b: Pin<PinRotaryB, FunctionSioInput, PullUp>,
-) {
+pub fn init(pin_rot_a: PinRotaryA, pin_rot_b: PinRotaryB) {
     unsafe {
         pin_rot_a.set_interrupt_enabled(EdgeLow, true);
         pin_rot_a.set_interrupt_enabled(EdgeHigh, true);
