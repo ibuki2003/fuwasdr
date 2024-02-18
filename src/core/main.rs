@@ -67,7 +67,12 @@ pub fn main() -> ! {
         .tune(81300.kHz())
         .unwrap_or_else(|e| info!("Failed to tune: {}", e));
 
-    crate::control::init(pins.rotary_a.reconfigure(), pins.rotary_b.reconfigure());
+    crate::control::init(
+        pins.rotary_a.reconfigure(),
+        pins.rotary_b.reconfigure(),
+        pins.button_1.reconfigure(),
+        pins.button_2.reconfigure(),
+    );
 
     let mut codec = crate::codec::Codec::new(
         pins.codec_mclk.reconfigure(),
@@ -144,6 +149,19 @@ pub fn main() -> ! {
 
     // codec.set_agc_target(7);
     codec.set_agc_target(7);
+    static TS_TBL: [u32; 9] = [
+        1,
+        10,
+        100,
+        1_000,
+        10_000,
+        100_000,
+        1_000_000,
+        10_000_000,
+        100_000_000,
+    ];
+    let mut tune_step_idx = 0;
+
     loop {
         // sound out
         // while !codec.get_i2s_tx().is_full() {
@@ -173,10 +191,23 @@ pub fn main() -> ! {
         }
 
         // control
-        let n = crate::control::pop_count();
-        if n != 0 {
+        let (rot, btn) = crate::control::fetch_inputs();
+        if btn & 1 != 0 && tune_step_idx < 8 {
+            tune_step_idx += 1;
+        }
+        if btn & 2 != 0 && tune_step_idx > 0 {
+            tune_step_idx -= 1;
+        }
+        if btn != 0 {
+            info!("btn: {}", btn);
+            let mut buf = [0u8; 9];
+            buf[8 - tune_step_idx as usize] = b'^';
+            display.draw_text(&buf, 32 * (8 - tune_step_idx), 64);
+        }
+        if rot != 0 {
             let f = clockctl.get_current_freq();
-            let f = f.to_Hz().wrapping_add(n as u32 * 100000);
+            let tune_step = TS_TBL[tune_step_idx as usize].max(clockctl.get_tune_step() as u32);
+            let f = f.to_Hz().wrapping_add(rot as u32 * tune_step);
             clockctl
                 .tune(hal::fugit::HertzU32::Hz(f))
                 .unwrap_or_else(|e| info!("Failed to tune: {}", e));

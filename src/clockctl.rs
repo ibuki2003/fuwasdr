@@ -72,6 +72,10 @@ impl<Alarm: rp2040_hal::timer::Alarm> ClockCtl<Alarm> {
         self.current_freq
     }
 
+    pub fn get_tune_step(&self) -> u8 {
+        self.get_tune_factors().ts
+    }
+
     fn get_tune_factors(&self) -> &TuneFactors {
         &TUNE_FACTORS[self.current_div_idx]
     }
