@@ -327,7 +327,7 @@ fn find_div_idx(target: HertzU32) -> Option<usize> {
 
     if target < HertzU32::Hz(333334) {
         // TODO: work with R Divider
-        panic!("Frequency too low");
+        return None;
     }
 
     if target > HertzU32::MHz( 150) { return Some(0); }

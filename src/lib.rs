@@ -12,6 +12,7 @@ pub mod clockctl;
 pub mod codec;
 pub mod core;
 pub mod dsp;
+pub mod control;
+pub mod display;
 pub mod i2c;
 pub mod util;
-pub mod control;

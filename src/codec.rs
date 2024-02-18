@@ -1,7 +1,10 @@
 // TLV320AIC3204
 #![allow(dead_code)]
-use crate::hal;
-use crate::i2c::SHARED_I2CBUS;
+use crate::{
+    dsp::DSPComplex,
+    hal,
+    i2c::SHARED_I2CBUS,
+};
 use hal::pio::PIOExt;
 use hal::{pac, pio::PIOBuilder};
 
@@ -9,6 +12,8 @@ use crate::board::*;
 use embedded_hal::i2c::I2c;
 
 type PIODevice = pac::PIO0;
+type SmClk = (PIODevice, hal::pio::SM0);
+type SmI2s = (PIODevice, hal::pio::SM1);
 
 pub struct Codec {
     pin_mclk: PinCodecMclk,
@@ -21,10 +26,10 @@ pub struct Codec {
     _pin_mfp4: PinCodecMfp4,
     _pin_mfp5: PinCodecMfp5,
 
-    sm_clk: hal::pio::StateMachine<(PIODevice, hal::pio::SM0), hal::pio::Running>,
-    sm_i2s: hal::pio::StateMachine<(PIODevice, hal::pio::SM1), hal::pio::Running>,
-    sm_i2s_rx: hal::pio::Rx<(PIODevice, hal::pio::SM1)>,
-    sm_i2s_tx: hal::pio::Tx<(PIODevice, hal::pio::SM1)>,
+    sm_clk: hal::pio::StateMachine<SmClk, hal::pio::Running>,
+    sm_i2s: hal::pio::StateMachine<SmI2s, hal::pio::Running>,
+    sm_i2s_rx: Option<hal::pio::Rx<SmI2s>>,
+    sm_i2s_tx: hal::pio::Tx<SmI2s>,
 }
 
 impl Codec {

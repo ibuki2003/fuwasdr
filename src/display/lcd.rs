@@ -1,39 +1,33 @@
 use crate::board::*;
 use crate::hal;
 use embedded_hal::{
-    digital::{InputPin, OutputPin, StatefulOutputPin},
+    digital::{OutputPin, StatefulOutputPin},
     spi::SpiBus,
 };
-use hal::{
-    fugit::HertzU32,
-    gpio::{FunctionNull, FunctionSioInput, FunctionSioOutput, Pin, PullDown, PullNone, PullUp},
-};
+use hal::fugit::HertzU32;
 
-const SPI_BAUD: HertzU32 = HertzU32::MHz(10);
-const LCD_WIDTH: u16 = 320;
-const LCD_HEIGHT: u16 = 240;
+const SPI_BAUD: HertzU32 = HertzU32::MHz(50);
 
-type LcdSpi = hal::spi::Spi<
-    hal::spi::Enabled,
-    LcdSpiDevice,
-    (PinLcdMosi, PinLcdMiso, PinLcdSck),
-    8,
->;
+type LcdSpi =
+    hal::spi::Spi<hal::spi::Enabled, LcdSpiDevice, (PinLcdMosi, PinLcdMiso, PinLcdSck), 8>;
 pub struct LcdDisplay {
     spi: LcdSpi,
     pin_dc: PinLcdDcRs,
     pin_reset: PinLcdReset,
-    pin_tourhirq: PinLcdTouchIrq,
-    pin_touchcs: PinLcdTouchCs,
+    _pin_touchirq: PinLcdTouchIrq,
+    _pin_touchcs: PinLcdTouchCs,
     pin_dispcs: PinLcdDispCs,
 }
 
 impl LcdDisplay {
+    pub const LCD_WIDTH: u16 = 320;
+    pub const LCD_HEIGHT: u16 = 240;
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         spidev: LcdSpiDevice,
         pin_reset: PinLcdReset,
-        pin_tourhirq: PinLcdTouchIrq,
+        pin_touchirq: PinLcdTouchIrq,
         pin_miso: PinLcdMiso,
         pin_touchcs: PinLcdTouchCs,
         pin_sck: PinLcdSck,
@@ -43,15 +37,7 @@ impl LcdDisplay {
         resets: &mut hal::pac::RESETS,
         peripheral_clock: HertzU32,
     ) -> Self {
-        let spi = hal::spi::Spi::new(
-            spidev,
-            (
-                pin_mosi,
-                pin_miso,
-                pin_sck,
-            ),
-        )
-        .init(
+        let spi = hal::spi::Spi::new(spidev, (pin_mosi, pin_miso, pin_sck)).init(
             resets,
             peripheral_clock,
             SPI_BAUD,
@@ -61,8 +47,8 @@ impl LcdDisplay {
             spi,
             pin_dc,
             pin_reset,
-            pin_tourhirq,
-            pin_touchcs,
+            _pin_touchirq: pin_touchirq,
+            _pin_touchcs: pin_touchcs,
             pin_dispcs,
         }
     }
@@ -77,7 +63,7 @@ impl LcdDisplay {
         cortex_m::asm::delay(125000 * 120); // at least 120ms
 
         // memory access ctl: landscape
-        self.send_command(&[0x36, 0x28]); // ?
+        self.send_command(&[0x36, 0x28]); // R/C exchange, BGR
 
         // color mode: 16bit
         self.send_command(&[0x3a, 0x55]);
@@ -100,10 +86,10 @@ impl LcdDisplay {
         // cortex_m::asm::delay(125000 * 60); // at least 60ms
 
         // fill screen with black
-        self.set_window(0, 0, LCD_WIDTH, LCD_HEIGHT);
-        for _ in 0..LCD_WIDTH as u32 * LCD_HEIGHT as u32 {
-            self.send_data(&[0, 0]);
-        }
+        self.set_window(0, 0, Self::LCD_WIDTH, Self::LCD_HEIGHT);
+        self.send_data_iter(
+            core::iter::repeat(0).take(Self::LCD_WIDTH as usize * Self::LCD_HEIGHT as usize * 2),
+        );
     }
 
     fn send_command(&mut self, command: &[u8]) {
@@ -155,5 +141,9 @@ impl LcdDisplay {
             (y + h - 1) as u8,
         ]);
         self.send_command(&[0x2c]);
+    }
+
+    pub fn set_scroll_pos(&mut self, y: u16) {
+        self.send_command(&[0x37, (y >> 8) as u8, y as u8]);
     }
 }

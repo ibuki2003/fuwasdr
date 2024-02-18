@@ -41,7 +41,7 @@ impl Iterator for TextRendererIter<'_> {
     type Item = u8;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.row > EN_FONT_HEIGHT {
+        if self.row >= EN_FONT_HEIGHT {
             return None;
         }
         let font_data = unsafe { core::slice::from_raw_parts(EN_FONT_ORIGIN, 32 * 16 * 6) };
@@ -67,11 +67,11 @@ impl Iterator for TextRendererIter<'_> {
         if self.byte >= EN_FONT_WIDTH * 2 {
             self.byte = 0;
             self.col += 1;
-        }
 
-        if self.col >= self.text.len() {
-            self.col = 0;
-            self.row += 1;
+            if self.col >= self.text.len() {
+                self.col = 0;
+                self.row += 1;
+            }
         }
 
         Some(data)

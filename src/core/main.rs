@@ -102,10 +102,7 @@ pub fn main() -> ! {
         &mut pac.RESETS,
         clocks.system_clock.freq(),
     ));
-
     display.init();
-
-    display.draw_text(b"Hello, world!", 0, 0);
 
     let usb_bus = usb_device::class_prelude::UsbBusAllocator::new(hal::usb::UsbBus::new(
         pac.USBCTRL_REGS,

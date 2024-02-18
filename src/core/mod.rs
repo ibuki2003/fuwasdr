@@ -1,1 +1,3 @@
-pub mod main;
+mod main;
+pub use main::main;
+mod spectrum;
