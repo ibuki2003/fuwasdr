@@ -1,10 +1,55 @@
+use super::spectrum;
+use crate::{board, codec, display, dsp::DSPComplex, hal, i2c::SHARED_I2CBUS};
+use core::cell::Cell;
+use critical_section::Mutex;
 use defmt::*;
-use hal::{fugit::RateExtU32, pac, Clock, Sio, Timer, Watchdog};
+use hal::{
+    dma::{self, DMAExt, SingleChannel},
+    fugit::RateExtU32,
+    pac::{self, interrupt},
+    Clock, Sio, Timer, Watchdog,
+};
 
-use crate::{board, hal, i2c::SHARED_I2CBUS};
+const DMABUF_LEN: usize = 192*2;
+static mut DMABUF: [u32; DMABUF_LEN] = [0; DMABUF_LEN];
+static mut DMA_IDX: usize = 0; // no mutex needed!
+const DMA_CHUNK_LEN: usize = 64;
+static mut DMA_TFR: Option<
+    dma::single_buffer::Transfer<dma::Channel<dma::CH0>, codec::Rx, &mut [u32]>,
+> = None;
 
-const USBBUF_LEN: usize = 192;
-static mut USBBUF0: [u8; USBBUF_LEN * 4 * 2] = [0; USBBUF_LEN * 4 * 2];
+static FFT_READY: Mutex<Cell<bool>> = Mutex::new(Cell::new(false));
+
+#[allow(non_snake_case)]
+#[interrupt]
+fn DMA_IRQ_0() {
+    let idx = unsafe { &mut DMA_IDX };
+
+    if !unsafe { DMA_TFR.as_ref().map_or(false, |t| t.is_done()) } {
+        defmt::warn!("TFR not done");
+        return;
+    }
+
+    let tfr = unsafe { DMA_TFR.take().unwrap() };
+
+    let (mut ch, from, _) = tfr.wait();
+
+    // clear flag
+    ch.check_irq0();
+
+    *idx += DMA_CHUNK_LEN;
+    if *idx >= DMABUF_LEN {
+        critical_section::with(|cs| {
+            FFT_READY.borrow(cs).set(true);
+        });
+        *idx = 0;
+    }
+
+    let next = unsafe { &mut DMABUF[*idx..*idx + DMA_CHUNK_LEN] };
+    unsafe {
+        DMA_TFR.replace(hal::dma::single_buffer::Config::new(ch, from, next).start());
+    }
+}
 
 pub fn main() -> ! {
     info!("Hello, world!");
@@ -35,15 +80,17 @@ pub fn main() -> ! {
         &mut pac.RESETS,
     );
 
+    let mut spectrumtask =
+        spectrum::SpectrumTask::new(&mut pac.PSM, &mut pac.PPB, sio.fifo).unwrap();
+    crate::dsp::fft::make_sequential_expi();
+
     let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
 
     // init shared i2c
     let i2c = hal::I2C::i2c0(
         pac.I2C0,
-        pins.i2c_sda
-            .reconfigure::<hal::gpio::FunctionI2c, hal::gpio::PullUp>(),
-        pins.i2c_scl
-            .reconfigure::<hal::gpio::FunctionI2c, hal::gpio::PullUp>(),
+        pins.i2c_sda.reconfigure(),
+        pins.i2c_scl.reconfigure(),
         100.kHz(),
         &mut pac.RESETS,
         &clocks.system_clock,
@@ -74,7 +121,7 @@ pub fn main() -> ! {
         pins.button_2.reconfigure(),
     );
 
-    let mut codec = crate::codec::Codec::new(
+    let mut codec = codec::Codec::new(
         pins.codec_mclk.reconfigure(),
         pins.codec_bclk.reconfigure(),
         pins.codec_wclk.reconfigure(),
@@ -87,9 +134,21 @@ pub fn main() -> ! {
         &mut pac.RESETS,
     );
     codec.init();
-    info!("codec init");
 
-    let mut display = crate::display::Manager::new(crate::display::LcdDisplay::new(
+    let mut dma = pac.DMA.split(&mut pac.RESETS);
+    // start first transfer
+    dma.ch0.enable_irq0();
+    unsafe {
+        defmt::debug_assert!(DMA_IDX == 0);
+        let buf = &mut DMABUF[..DMA_CHUNK_LEN];
+        let tfr =
+            hal::dma::single_buffer::Config::new(dma.ch0, codec.take_rx().unwrap(), buf).start();
+        DMA_TFR.replace(tfr);
+
+        pac::NVIC::unmask(pac::Interrupt::DMA_IRQ_0);
+    }
+
+    let mut display = display::Manager::new(display::LcdDisplay::new(
         pac.SPI0,
         pins.lcd_reset.reconfigure(),
         pins.lcd_touchirq.reconfigure(),
@@ -136,17 +195,20 @@ pub fn main() -> ! {
     // .device_class(0xEF)
     .build();
 
-    let mut usb_buf_write = unsafe { &mut USBBUF0[0..USBBUF_LEN * 4] };
-    let mut usb_buf_read = unsafe { &mut USBBUF0[USBBUF_LEN * 4..USBBUF_LEN * 4 * 2] };
-    let mut usb_buf_idx = 0;
+    const FFTBUF_LEN: usize = 256;
+    static mut FFTBUF: [DSPComplex; FFTBUF_LEN] = [DSPComplex::zero(); FFTBUF_LEN];
+    let mut fft_buf = Some(unsafe { &mut FFTBUF });
 
-    let mut ctr = 0;
+    const USBBUF_LEN: usize = 192;
+    static mut USBBUF: [u8; USBBUF_LEN * 4] = [0; USBBUF_LEN * 4];
+    let usb_buf = unsafe { &mut USBBUF };
 
     let mut t = timer.get_counter_low();
 
-    // codec.set_agc_target(7);
-    codec.set_agc_target(7);
-    static TS_TBL: [u32; 9] = [
+    let mut agc = 6;
+    codec.set_agc_target(agc);
+
+    const TS_TBL: [u32; 9] = [
         1,
         10,
         100,
@@ -157,71 +219,75 @@ pub fn main() -> ! {
         10_000_000,
         100_000_000,
     ];
-    let mut tune_step_idx = 0;
+    let mut cursor = 0;
+    const CURSOR_MOD: u8 = TS_TBL.len() as u8 + 1;
 
+    display.draw_freq(clockctl.get_current_freq().to_Hz());
+    display.draw_cursor(cursor);
+
+    // main loop
     loop {
-        // sound out
-        // while !codec.get_i2s_tx().is_full() {
-        //     let v = &SINE_TBL[tx_idx];
-        //     let vv = (*v).unsigned_abs() as u32 + 32768;
-        //     let vv = vv | (vv << 16);
-        //     if codec.get_i2s_tx().write(vv) {
-        //         tx_idx += 1;
-        //         if tx_idx >= 48 {
-        //             tx_idx = 0;
-        //         }
-        //     }
-        // }
-
-        // signal in
         {
-            while let Some(v) = codec.read_sample() {
-                usb_buf_write[usb_buf_idx..usb_buf_idx + 2].copy_from_slice(&v.0.to_le_bytes());
-                usb_buf_write[usb_buf_idx + 2..usb_buf_idx + 4].copy_from_slice(&v.1.to_le_bytes());
-                usb_buf_idx += 4;
+            let fft_ready = critical_section::with(|cs| {
+                // if true, set false and return
+                FFT_READY.borrow(cs).replace(false)
+            });
 
-                if usb_buf_idx >= USBBUF_LEN * 4 {
-                    core::mem::swap(&mut usb_buf_write, &mut usb_buf_read);
-                    usb_buf_idx = 0;
+            if fft_ready {
+                if let Some(buf) = fft_buf.take() {
+                    buf.copy_from_slice(unsafe {
+                        core::slice::from_raw_parts(
+                            DMABUF.as_ptr() as *const DSPComplex,
+                            256,
+                        )
+                    });
+                    spectrumtask.run_fft(buf);
                 }
             }
         }
 
         // control
         let (rot, btn) = crate::control::fetch_inputs();
-        if btn & 1 != 0 && tune_step_idx < 8 {
-            tune_step_idx += 1;
-        }
-        if btn & 2 != 0 && tune_step_idx > 0 {
-            tune_step_idx -= 1;
-        }
         if btn != 0 {
-            info!("btn: {}", btn);
-            let mut buf = [0u8; 9];
-            buf[8 - tune_step_idx as usize] = b'^';
-            display.draw_text(&buf, 32 * (8 - tune_step_idx), 64);
+            if btn & 1 != 0 {
+                cursor += 1;
+            }
+            if btn & 2 != 0 {
+                // cursor -= 1;
+                cursor += CURSOR_MOD - 1;
+            }
+            // cursor = cursor.clamp(0, 9);
+            cursor %= CURSOR_MOD;
+            display.draw_cursor(cursor);
         }
         if rot != 0 {
-            let f = clockctl.get_current_freq();
-            let tune_step = TS_TBL[tune_step_idx as usize].max(clockctl.get_tune_step() as u32);
-            let f = f.to_Hz().wrapping_add(rot as u32 * tune_step);
-            clockctl
-                .tune(hal::fugit::HertzU32::Hz(f))
-                .unwrap_or_else(|e| info!("Failed to tune: {}", e));
-            info!("tune to {} kHz", f);
-
-            let mut buf = [0u8; 9];
-
-            let mut f = f;
-            for i in (0..9).rev() {
-                buf[i] = (f % 10) as u8 + b'0';
-                f /= 10;
-                if f == 0 {
-                    break;
+            match cursor {
+                0..=8 => {
+                    // tune
+                    let f = clockctl.get_current_freq();
+                    let tune_step = TS_TBL[cursor as usize].max(clockctl.get_tune_step() as u32);
+                    let f = f.to_Hz().wrapping_add(rot as u32 * tune_step);
+                    match clockctl.tune(hal::fugit::HertzU32::Hz(f)) {
+                        Err(e) => info!("Failed to tune: {}", e),
+                        Ok(_) => display.draw_freq(f),
+                    }
                 }
+                9 => {
+                    // agc
+                    agc = (agc as i32 + rot).clamp(0, 7) as u8;
+                    codec.set_agc_target(agc);
+                    display.draw_text(&[b'0' + agc], 300, 10);
+                }
+                _ => core::unreachable!(),
             }
+        }
 
-            display.draw_text(&buf, 0, 32);
+        {
+            if let Some(v) = spectrumtask.get_result() {
+                display.draw_spectrum(v);
+                // push back to buffer pool
+                fft_buf.replace(v);
+            }
         }
 
         // stat log
@@ -229,16 +295,15 @@ pub fn main() -> ! {
         if tt.wrapping_sub(t) > 1_000_000 {
             info!("AGC status: {}", codec.get_agc_gain());
             t = tt;
-
-            info!("poll count: {}", ctr);
-            ctr = 0;
         }
 
         // usb
         if usb_dev.poll(&mut [&mut usb_audio]) {
-            // info!("poll");
-            ctr += 1;
-            usb_audio.write(usb_buf_read).ok();
+            let src_idx = if unsafe { DMA_IDX } < USBBUF_LEN { USBBUF_LEN } else { 0 };
+            let src = unsafe { &DMABUF[src_idx..src_idx + USBBUF_LEN] };
+            unsafe {core::slice::from_raw_parts_mut(usb_buf.as_mut_ptr() as *mut u32, USBBUF_LEN)}
+                .copy_from_slice(src);
+            usb_audio.write(usb_buf).ok();
         }
     }
 }

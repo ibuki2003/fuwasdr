@@ -81,7 +81,6 @@ impl<Alarm: rp2040_hal::timer::Alarm> ClockCtl<Alarm> {
     }
 
     pub fn tune(&mut self, target: HertzU32) -> Result<(), Error> {
-        self.current_freq = target;
         let a = self.get_tune_factors().get_synth_param(target);
         if a != 0 {
             // just set pll
@@ -94,6 +93,7 @@ impl<Alarm: rp2040_hal::timer::Alarm> ClockCtl<Alarm> {
             self.set_plla_mul(a, self.get_tune_factors().c)?;
         }
 
+        self.current_freq = target;
         Ok(())
     }
 

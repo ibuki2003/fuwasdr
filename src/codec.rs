@@ -14,6 +14,8 @@ use embedded_hal::i2c::I2c;
 type PIODevice = pac::PIO0;
 type SmClk = (PIODevice, hal::pio::SM0);
 type SmI2s = (PIODevice, hal::pio::SM1);
+pub type Rx = hal::pio::Rx<SmI2s>;
+
 
 pub struct Codec {
     pin_mclk: PinCodecMclk,
@@ -28,7 +30,7 @@ pub struct Codec {
 
     sm_clk: hal::pio::StateMachine<SmClk, hal::pio::Running>,
     sm_i2s: hal::pio::StateMachine<SmI2s, hal::pio::Running>,
-    sm_i2s_rx: Option<hal::pio::Rx<SmI2s>>,
+    sm_i2s_rx: Option<Rx>,
     sm_i2s_tx: hal::pio::Tx<SmI2s>,
 }
 
@@ -127,7 +129,7 @@ impl Codec {
 
             sm_clk: sm_clk.start(),
             sm_i2s: sm_i2s.start(),
-            sm_i2s_rx: rx,
+            sm_i2s_rx: Some(rx),
             sm_i2s_tx: tx,
         }
     }
@@ -217,15 +219,8 @@ impl Codec {
         // setup DMA
     }
 
-    pub fn read_sample(&mut self) -> Option<(u16, u16)> {
-        self.sm_i2s_rx
-            .read()
-            // .map(|v| unsafe { *(&v as *const u32 as *const DSPComplex) })
-            .map(|v| {
-                let re = (v & 0xffff) as u16;
-                let im = ((v >> 16) & 0xffff) as u16;
-                (re, im)
-            })
+    pub fn take_rx(&mut self) -> Option<Rx> {
+        self.sm_i2s_rx.take()
     }
 
     pub fn try_write_sample(&mut self, v: DSPComplex) -> bool {

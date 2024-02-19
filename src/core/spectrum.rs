@@ -48,10 +48,8 @@ fn core1_task() {
 
     loop {
         let p = sio.fifo.read_blocking();
-        defmt::info!("core1: got buffer @ {=u32:x}", p);
         let buffer = unsafe { &mut *(p as *mut FFTBuffer) };
         fft(buffer);
-        defmt::info!("core1: done");
         sio.fifo.write_blocking(p);
     }
 }
