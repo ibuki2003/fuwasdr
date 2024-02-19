@@ -170,8 +170,8 @@ impl Codec {
                 &[0x36, 0b01 << 1],  // DIN is primary din
                 &[0x53, 40],         // Left 20dB
                 &[0x54, 40],         // Right 20dB
-                &[0x56, 0x80],       // AGC -5.5dBFS no hysteresis
-                &[0x5e, 0x80],       // AGC -5.5dBFS no hysteresis
+                &[0x56, 0x83],       // AGC -5.5dBFS, +/- 1.5dB gain hysteresis
+                &[0x5e, 0x83],       // AGC -5.5dBFS, +/- 1.5dB gain hysteresis
                 // routing
                 &[0x00, 0x01], // page 1
                 &[0x01, 0x08], // enable AVdd LDO
