@@ -1,3 +1,4 @@
 mod main;
 pub use main::main;
-mod spectrum;
+mod usb;
+mod dma;

@@ -1,5 +1,7 @@
 #![no_std]
 
+pub const SAMPLE_RATE: usize = 192_000;
+
 use defmt_rtt as _;
 use panic_probe as _;
 

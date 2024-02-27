@@ -1,55 +1,16 @@
-use super::spectrum;
-use crate::{board, codec, display, dsp::DSPComplex, hal, i2c::SHARED_I2CBUS};
-use core::cell::Cell;
-use critical_section::Mutex;
+use crate::{
+    board, codec, display,
+    dsp::{self, DSPComplex},
+    hal,
+    i2c::SHARED_I2CBUS,
+};
 use defmt::*;
 use hal::{
-    dma::{self, DMAExt, SingleChannel},
+    dma::DMAExt,
     fugit::RateExtU32,
-    pac::{self, interrupt},
+    pac::{self},
     Clock, Sio, Timer, Watchdog,
 };
-
-const DMABUF_LEN: usize = 192*2;
-static mut DMABUF: [u32; DMABUF_LEN] = [0; DMABUF_LEN];
-static mut DMA_IDX: usize = 0; // no mutex needed!
-const DMA_CHUNK_LEN: usize = 64;
-static mut DMA_TFR: Option<
-    dma::single_buffer::Transfer<dma::Channel<dma::CH0>, codec::Rx, &mut [u32]>,
-> = None;
-
-static FFT_READY: Mutex<Cell<bool>> = Mutex::new(Cell::new(false));
-
-#[allow(non_snake_case)]
-#[interrupt]
-fn DMA_IRQ_0() {
-    let idx = unsafe { &mut DMA_IDX };
-
-    if !unsafe { DMA_TFR.as_ref().map_or(false, |t| t.is_done()) } {
-        defmt::warn!("TFR not done");
-        return;
-    }
-
-    let tfr = unsafe { DMA_TFR.take().unwrap() };
-
-    let (mut ch, from, _) = tfr.wait();
-
-    // clear flag
-    ch.check_irq0();
-
-    *idx += DMA_CHUNK_LEN;
-    if *idx >= DMABUF_LEN {
-        critical_section::with(|cs| {
-            FFT_READY.borrow(cs).set(true);
-        });
-        *idx = 0;
-    }
-
-    let next = unsafe { &mut DMABUF[*idx..*idx + DMA_CHUNK_LEN] };
-    unsafe {
-        DMA_TFR.replace(hal::dma::single_buffer::Config::new(ch, from, next).start());
-    }
-}
 
 pub fn main() -> ! {
     info!("Hello, world!");
@@ -80,8 +41,6 @@ pub fn main() -> ! {
         &mut pac.RESETS,
     );
 
-    let mut spectrumtask =
-        spectrum::SpectrumTask::new(&mut pac.PSM, &mut pac.PPB, sio.fifo).unwrap();
     crate::dsp::fft::make_sequential_expi();
 
     let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
@@ -135,18 +94,8 @@ pub fn main() -> ! {
     );
     codec.init();
 
-    let mut dma = pac.DMA.split(&mut pac.RESETS);
-    // start first transfer
-    dma.ch0.enable_irq0();
-    unsafe {
-        defmt::debug_assert!(DMA_IDX == 0);
-        let buf = &mut DMABUF[..DMA_CHUNK_LEN];
-        let tfr =
-            hal::dma::single_buffer::Config::new(dma.ch0, codec.take_rx().unwrap(), buf).start();
-        DMA_TFR.replace(tfr);
-
-        pac::NVIC::unmask(pac::Interrupt::DMA_IRQ_0);
-    }
+    let dma = pac.DMA.split(&mut pac.RESETS);
+    super::dma::init(dma.ch0, codec.take_rx().unwrap());
 
     let mut display = display::Manager::new(display::LcdDisplay::new(
         pac.SPI0,
@@ -163,45 +112,22 @@ pub fn main() -> ! {
     ));
     display.init();
 
-    let usb_bus = usb_device::class_prelude::UsbBusAllocator::new(hal::usb::UsbBus::new(
+    let usb_bus = usb_device::bus::UsbBusAllocator::new(hal::usb::UsbBus::new(
         pac.USBCTRL_REGS,
         pac.USBCTRL_DPRAM,
         clocks.usb_clock,
         true,
         &mut pac.RESETS,
     ));
+    static mut USBBUS: Option<usb_device::bus::UsbBusAllocator<hal::usb::UsbBus>> = None;
+    unsafe {
+        USBBUS.replace(usb_bus);
+    }
 
-    let mut usb_audio = usbd_audio::AudioClassBuilder::new()
-        .input(
-            usbd_audio::StreamConfig::new_discrete(
-                usbd_audio::Format::S16le,
-                2,
-                &[192000],
-                usbd_audio::TerminalType::InMicrophone,
-            )
-            .unwrap(),
-        )
-        .build(&usb_bus)
-        .unwrap();
-
-    let mut usb_dev = usb_device::prelude::UsbDeviceBuilder::new(
-        &usb_bus,
-        usb_device::prelude::UsbVidPid(0x16c0, 0x27dd),
-    )
-    .max_packet_size_0(64)
-    .manufacturer("Fake company")
-    .product("Audio")
-    .serial_number("TEST")
-    // .device_class(0xEF)
-    .build();
+    super::usb::UsbDev::init(unsafe { USBBUS.as_ref().unwrap() });
 
     const FFTBUF_LEN: usize = 256;
-    static mut FFTBUF: [DSPComplex; FFTBUF_LEN] = [DSPComplex::zero(); FFTBUF_LEN];
-    let mut fft_buf = Some(unsafe { &mut FFTBUF });
-
-    const USBBUF_LEN: usize = 192;
-    static mut USBBUF: [u8; USBBUF_LEN * 4] = [0; USBBUF_LEN * 4];
-    let usb_buf = unsafe { &mut USBBUF };
+    let mut fft_buf = [DSPComplex::zero(); FFTBUF_LEN];
 
     let mut t = timer.get_counter_low();
 
@@ -230,19 +156,18 @@ pub fn main() -> ! {
         {
             let fft_ready = critical_section::with(|cs| {
                 // if true, set false and return
-                FFT_READY.borrow(cs).replace(false)
+                crate::core::dma::FFT_READY.borrow(cs).replace(false)
             });
 
             if fft_ready {
-                if let Some(buf) = fft_buf.take() {
-                    buf.copy_from_slice(unsafe {
-                        core::slice::from_raw_parts(
-                            DMABUF.as_ptr() as *const DSPComplex,
-                            256,
-                        )
-                    });
-                    spectrumtask.run_fft(buf);
-                }
+                fft_buf.copy_from_slice(unsafe {
+                    core::slice::from_raw_parts(
+                        crate::core::dma::DMABUF.as_ptr() as *const DSPComplex,
+                        256,
+                    )
+                });
+                dsp::fft::fft(&mut fft_buf);
+                display.draw_spectrum(&fft_buf);
             }
         }
 
@@ -282,28 +207,11 @@ pub fn main() -> ! {
             }
         }
 
-        {
-            if let Some(v) = spectrumtask.get_result() {
-                display.draw_spectrum(v);
-                // push back to buffer pool
-                fft_buf.replace(v);
-            }
-        }
-
         // stat log
         let tt = timer.get_counter_low();
         if tt.wrapping_sub(t) > 1_000_000 {
             info!("AGC status: {}", codec.get_agc_gain());
             t = tt;
-        }
-
-        // usb
-        if usb_dev.poll(&mut [&mut usb_audio]) {
-            let src_idx = if unsafe { DMA_IDX } < USBBUF_LEN { USBBUF_LEN } else { 0 };
-            let src = unsafe { &DMABUF[src_idx..src_idx + USBBUF_LEN] };
-            unsafe {core::slice::from_raw_parts_mut(usb_buf.as_mut_ptr() as *mut u32, USBBUF_LEN)}
-                .copy_from_slice(src);
-            usb_audio.write(usb_buf).ok();
         }
     }
 }
