@@ -1,6 +1,6 @@
 use auto_ops::impl_op_ex;
 
-#[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord)]
+#[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Default)]
 pub struct DSPNum(pub i16);
 
 impl DSPNum {

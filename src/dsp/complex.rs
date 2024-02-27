@@ -2,7 +2,7 @@ use super::number::unshift_fpmul;
 use super::number::DSPNum;
 use auto_ops::impl_op_ex;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 #[repr(C, align(4))]
 pub struct DSPComplex {
     pub re: DSPNum,
@@ -86,6 +86,7 @@ impl DSPComplex {
     }
 
     // returns (cos(theta * pi / 2 / 2^16) + sin(theta * pi / 2 / 2^16) * i)
+    // i.e. theta = 1<<18 represents 2pi
     pub fn expi(theta: i32) -> DSPComplex {
         let orthant = (theta >> 16) & 3;
         let theta = (theta & 0xffff) as u16;
