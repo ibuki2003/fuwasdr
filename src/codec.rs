@@ -170,8 +170,8 @@ impl Codec {
                 &[0x36, 0b01 << 1],  // DIN is primary din
                 &[0x53, 40],         // Left 20dB
                 &[0x54, 40],         // Right 20dB
-                &[0x56, 0x83],       // AGC -5.5dBFS, +/- 1.5dB gain hysteresis
-                &[0x5e, 0x83],       // AGC -5.5dBFS, +/- 1.5dB gain hysteresis
+                &[0x56, 0x00],       // AGC Disabled
+                &[0x5e, 0x00],       // AGC Disabled
                 // routing
                 &[0x00, 0x01], // page 1
                 &[0x01, 0x08], // enable AVdd LDO
@@ -236,6 +236,16 @@ impl Codec {
             i2c.write(Self::I2C_ADDR, &[0x00, 0x00]).unwrap();
             i2c.write(Self::I2C_ADDR, &[0x56, vv]).unwrap();
             i2c.write(Self::I2C_ADDR, &[0x5e, vv]).unwrap();
+        });
+    }
+
+    pub fn set_adc_gain(&mut self, v: u8) {
+        critical_section::with(|cs| {
+            let mut rc = SHARED_I2CBUS.borrow(cs).borrow_mut();
+            let i2c = rc.as_mut().unwrap();
+            i2c.write(Self::I2C_ADDR, &[0x00, 0x01]).unwrap();
+            i2c.write(Self::I2C_ADDR, &[0x3b, v]).unwrap();
+            i2c.write(Self::I2C_ADDR, &[0x3c, v]).unwrap();
         });
     }
 

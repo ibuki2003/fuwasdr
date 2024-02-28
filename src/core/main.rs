@@ -131,8 +131,8 @@ pub fn main() -> ! {
 
     let mut t = timer.get_counter_low();
 
-    let mut agc = 6;
-    codec.set_agc_target(agc);
+    let mut gain = 0;
+    codec.set_adc_gain(gain);
 
     const TS_TBL: [u32; 9] = [
         1,
@@ -199,9 +199,12 @@ pub fn main() -> ! {
                 }
                 9 => {
                     // agc
-                    agc = (agc as i32 + rot).clamp(0, 7) as u8;
-                    codec.set_agc_target(agc);
-                    display.draw_text(&[b'0' + agc], 300, 10);
+                    gain = (gain as i32 + rot).clamp(0, 95) as u8;
+                    codec.set_adc_gain(gain);
+                    let mut buf = [0u8; 2];
+                    buf[0] = b'0' + gain / 10;
+                    buf[1] = b'0' + gain % 10;
+                    display.draw_text(&buf, 280, 10);
                 }
                 _ => core::unreachable!(),
             }
