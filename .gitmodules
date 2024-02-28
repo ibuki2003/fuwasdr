@@ -1,0 +1,3 @@
+[submodule "board/msp2807-kicad-lib"]
+	path = board/msp2807-kicad-lib
+	url = https://github.com/m-dev672/msp2807-kicad-lib/
