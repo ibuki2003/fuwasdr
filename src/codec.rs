@@ -206,6 +206,26 @@ impl Codec {
                 i2c.write(Self::I2C_ADDR, *chunk).unwrap();
             }
 
+            // filter settings
+
+            // ADC: IIR 1st order high pass filter
+            i2c.write(Self::I2C_ADDR, &[0x00, 0x08]).unwrap();
+            i2c.write(Self::I2C_ADDR, &[0x01, 0x00]).unwrap();
+
+            let mut coeffs = [
+                24, // addr
+                0x7f, 0xff, 0x77, 0x00, // N0
+                0x80, 0x00, 0x89, 0x00, // N1
+                0x7f, 0xfe, 0xed, 0x00, // D1
+            ];
+            // left
+            i2c.write(Self::I2C_ADDR, &coeffs).unwrap();
+
+            // right
+            i2c.write(Self::I2C_ADDR, &[0x00, 0x09]).unwrap();
+            coeffs[0] = 32;
+            i2c.write(Self::I2C_ADDR, &coeffs).unwrap();
+
             cortex_m::asm::delay(125_000 * 10); // about 10ms
 
             let chunks = &[
