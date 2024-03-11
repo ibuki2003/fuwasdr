@@ -11,6 +11,7 @@ pub struct Manager {
 impl Manager {
     const FREQ_X: u16 = 64;
     const FREQ_Y: u16 = 0;
+    const WF_X: u16 = 32;
     const WF_Y: u16 = 64;
 
     pub fn new(lcd: LcdDisplay) -> Self {
@@ -28,12 +29,14 @@ impl Manager {
         self.lcd.send_data_iter(renderer);
     }
 
-    pub fn draw_freq(&mut self, mut freq: u32) {
+    pub fn draw_freq(&mut self, freq: u32) {
         let mut buf = [0u8; 9];
+
+        let mut f0 = freq;
         for j in (0..9).rev() {
-            buf[j] = (freq % 10) as u8 + b'0';
-            freq /= 10;
-            if freq == 0 {
+            buf[j] = (f0 % 10) as u8 + b'0';
+            f0 /= 10;
+            if f0 == 0 {
                 break;
             }
         }
@@ -44,6 +47,48 @@ impl Manager {
                 Self::FREQ_X + (16 * 3 + 8) * i as u16,
                 Self::FREQ_Y,
             );
+        }
+
+        // waterfall
+        // interval = 100kHz
+        // in screen = 133px
+
+        self.lcd
+            .set_window(0, Self::WF_Y - 8, LcdDisplay::LCD_WIDTH, 8);
+        self.lcd
+            .send_data_iter(core::iter::repeat(0x00).take(LcdDisplay::LCD_WIDTH as usize * 8 * 2));
+
+        buf[4] = b'.';
+        buf[6] = b'M';
+        let mut f = (freq - 96_000 + 100_000 - 1) / 100_000;
+        let mut x =
+            (Self::WF_X as i32 + 128 + ((f * 100_000) as i32 - freq as i32) * 256 / 192000) as u16;
+        while f * 100_000 < freq + 96_000 {
+            let mut f0 = f;
+
+            buf[5] = (f0 % 10) as u8 + b'0';
+            f0 /= 10;
+
+            let mut i = 0;
+            for j in (0..4).rev() {
+                buf[j] = (f0 % 10) as u8 + b'0';
+                f0 /= 10;
+                if f0 == 0 {
+                    i = j;
+                    break;
+                }
+            }
+
+            let text = super::text::TextRendererMisaki::new(&buf[i..7]);
+            self.lcd.set_window(x, Self::WF_Y - 8, 1, 8);
+            self.lcd
+                .send_data_iter(core::iter::repeat(0xff).take(8 * 2));
+            self.lcd
+                .set_window(x + 1, Self::WF_Y - 8, text.size().0, text.size().1);
+            self.lcd.send_data_iter(text);
+
+            f += 1;
+            x += 133;
         }
     }
 
@@ -62,8 +107,12 @@ impl Manager {
     }
 
     pub fn draw_spectrum(&mut self, data: &[crate::dsp::DSPComplex]) {
-        self.lcd
-            .set_window(32, self.spectrum_y + Self::WF_Y, data.len() as u16, 1);
+        self.lcd.set_window(
+            Self::WF_X,
+            self.spectrum_y + Self::WF_Y,
+            data.len() as u16,
+            1,
+        );
         for d in data {
             let re = (d.re.0 >> 3).min(255).unsigned_abs();
             let im = (d.im.0 >> 3).min(255).unsigned_abs();
@@ -79,8 +128,13 @@ impl Manager {
     }
 }
 
+const COLOR_SHIFT: u16 = 4;
 // map from 0..=65535
 fn colormap(v: u16) -> u16 {
+    if v >= (1 << (16 - COLOR_SHIFT)) {
+        return 0xffff;
+    }
+    let v = v << COLOR_SHIFT;
     match v {
         0..=16383 => v >> 9,
         16384..=49151 => ((v - 16384) >> 4) | 31,
