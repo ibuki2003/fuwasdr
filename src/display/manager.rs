@@ -22,10 +22,10 @@ impl Manager {
     }
 
     pub fn draw_text(&mut self, text: &[u8], x: u16, y: u16) {
-        let renderer = super::text::TextRenderer::new(text);
+        let renderer = super::text::TextRendererEN::new(text);
         let size = renderer.size();
         self.lcd.set_window(x, y, size.0, size.1);
-        self.lcd.send_data_iter(renderer.render());
+        self.lcd.send_data_iter(renderer);
     }
 
     pub fn draw_freq(&mut self, mut freq: u32) {

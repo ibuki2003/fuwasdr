@@ -1,70 +1,102 @@
 // text renderer
 
-const EN_FONT_ORIGIN: *const u16 = (0x10000000 | 0x1fe800) as *const u16;
-const EN_FONT_HEIGHT: u8 = 32;
-const EN_FONT_WIDTH: u8 = 16;
+use num::traits::AsPrimitive;
 
-pub struct TextRenderer<'a> {
-    text: &'a [u8],
-}
+pub trait AsciiFont {
+    type Octet: AsPrimitive<u32>;
+    // const ORIGIN: *const Octet;
+    const HEIGHT: u8;
+    const WIDTH: u8;
 
-impl<'a> TextRenderer<'a> {
-    pub fn new(text: &[u8]) -> TextRenderer {
-        TextRenderer { text }
+    fn data() -> &'static [Self::Octet];
+
+    fn glyph(c: u8) -> Option<&'static [Self::Octet]> {
+        if (0x20..=0x7f).contains(&c) {
+            Some(&Self::data()[(c - 0x20) as usize * Self::HEIGHT as usize..])
+        } else {
+            None
+        }
     }
 
-    pub fn size(&self) -> (u16, u16) {
-        (
-            self.text.len() as u16 * EN_FONT_WIDTH as u16,
-            EN_FONT_HEIGHT as u16,
-        )
-    }
-
-    pub fn render(self) -> TextRendererIter<'a> {
-        TextRendererIter {
-            text: self.text,
-            row: 0,
-            col: 0,
-            byte: 0,
+    fn get_pixel(c: u8, row: u8, col: u8) -> bool {
+        match Self::glyph(c) {
+            Some(glyph) => ((glyph[row as usize].as_() >> col) & 1) != 0,
+            None => false,
         }
     }
 }
 
-pub struct TextRendererIter<'a> {
+pub struct FontEN;
+impl FontEN {
+    const ORIGIN: *const u16 = (0x10000000 | 0x1fe800) as *const u16;
+}
+impl AsciiFont for FontEN {
+    type Octet = u16;
+    const HEIGHT: u8 = 32;
+    const WIDTH: u8 = 16;
+
+    fn data() -> &'static [u16] {
+        unsafe { core::slice::from_raw_parts(Self::ORIGIN, Self::HEIGHT as usize * 96) }
+    }
+}
+
+pub struct FontMisaki;
+impl FontMisaki {
+    const ORIGIN: *const u8 = (0x10000000 | 0x100000) as *const u8;
+}
+impl AsciiFont for FontMisaki {
+    type Octet = u8;
+    const HEIGHT: u8 = 8;
+    const WIDTH: u8 = 8;
+
+    fn data() -> &'static [u8] {
+        unsafe { core::slice::from_raw_parts(Self::ORIGIN, Self::HEIGHT as usize * 96) }
+    }
+}
+
+pub struct TextRenderer<'a, F: AsciiFont> {
     text: &'a [u8],
     row: u8,
     col: usize,
     byte: u8,
+
+    _phantom: core::marker::PhantomData<F>,
 }
 
-impl Iterator for TextRendererIter<'_> {
+pub type TextRendererEN<'a> = TextRenderer<'a, FontEN>;
+pub type TextRendererMisaki<'a> = TextRenderer<'a, FontMisaki>;
+
+impl<'a, F: AsciiFont> TextRenderer<'a, F> {
+    pub fn new(text: &'a [u8]) -> Self {
+        Self {
+            text,
+            row: 0,
+            col: 0,
+            byte: 0,
+            _phantom: core::marker::PhantomData,
+        }
+    }
+
+    pub fn size(&self) -> (u16, u16) {
+        (self.text.len() as u16 * F::WIDTH as u16, F::HEIGHT as u16)
+    }
+}
+
+impl<F: AsciiFont> Iterator for TextRenderer<'_, F> {
     type Item = u8;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.row >= EN_FONT_HEIGHT {
+        if self.row >= F::HEIGHT {
             return None;
         }
-        let font_data = unsafe { core::slice::from_raw_parts(EN_FONT_ORIGIN, 32 * 16 * 6) };
 
         let char = self.text[self.col];
+        let pixel = F::get_pixel(char, self.row, self.byte >> 1);
 
-        let data = if (0x20..=0x7f).contains(&char) {
-            let glyph =
-                font_data[(char - 0x20) as usize * EN_FONT_HEIGHT as usize + self.row as usize];
-            let bit = (glyph >> (self.byte >> 1)) & 1;
-
-            if bit != 0 {
-                // if self.byte & 1 != 0 { 0xff } else { 0xff }
-                0xff
-            } else {
-                0
-            }
-        } else {
-            0
-        };
+        let data = if pixel { 0xff } else { 0 };
 
         self.byte += 1;
-        if self.byte >= EN_FONT_WIDTH * 2 {
+        if self.byte >= F::WIDTH * 2 {
             self.byte = 0;
             self.col += 1;
 
