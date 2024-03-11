@@ -1,12 +1,14 @@
 use core::cell::Cell;
 
-use crate::{hal, codec};
-use pac::interrupt;
+use crate::{codec, hal};
 use critical_section::Mutex;
-use hal::{dma::{self, CH0, SingleChannel, Channel}, pac};
+use hal::{
+    dma::{self, Channel, SingleChannel, CH0},
+    pac,
+};
+use pac::interrupt;
 
-
-pub const DMABUF_LEN: usize = 192*2;
+pub const DMABUF_LEN: usize = 192 * 2;
 pub static mut DMABUF: [u32; DMABUF_LEN] = [0; DMABUF_LEN];
 pub static mut DMA_IDX: usize = 0; // no mutex needed!
 pub const DMA_CHUNK_LEN: usize = 64;

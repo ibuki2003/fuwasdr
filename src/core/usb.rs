@@ -1,5 +1,8 @@
-use crate::{ hal,  SAMPLE_RATE, core::dma::{DMA_IDX, DMABUF}};
-use hal:: pac::{self, interrupt} ;
+use crate::{
+    core::dma::{DMABUF, DMA_IDX},
+    hal, SAMPLE_RATE,
+};
+use hal::pac::{self, interrupt};
 
 pub static mut USBDEV: Option<UsbDev<'static>> = None;
 
@@ -9,9 +12,7 @@ pub struct UsbDev<'a> {
 }
 
 impl UsbDev<'static> {
-    pub fn init(
-        usb_bus: &'static usb_device::bus::UsbBusAllocator<hal::usb::UsbBus>,
-    ) {
+    pub fn init(usb_bus: &'static usb_device::bus::UsbBusAllocator<hal::usb::UsbBus>) {
         let usb_audio = usbd_audio::AudioClassBuilder::new()
             .input(
                 usbd_audio::StreamConfig::new_discrete(
@@ -35,11 +36,7 @@ impl UsbDev<'static> {
         .serial_number("TEST")
         .build();
 
-
-        let u = Self {
-            usb_dev,
-            usb_audio,
-        };
+        let u = Self { usb_dev, usb_audio };
 
         unsafe {
             USBDEV.replace(u);
@@ -47,7 +44,6 @@ impl UsbDev<'static> {
         }
     }
 }
-
 
 #[allow(non_snake_case)]
 #[interrupt]
@@ -62,10 +58,14 @@ fn USBCTRL_IRQ() {
     let usb_audio = &mut usb.usb_audio;
 
     if usb_dev.poll(&mut [usb_audio]) {
-        let src_idx = if unsafe { DMA_IDX } < USBBUF_LEN { USBBUF_LEN } else { 0 };
+        let src_idx = if unsafe { DMA_IDX } < USBBUF_LEN {
+            USBBUF_LEN
+        } else {
+            0
+        };
         let src = unsafe { &DMABUF[src_idx..src_idx + USBBUF_LEN] };
-        unsafe {core::slice::from_raw_parts_mut(usb_buf.as_mut_ptr() as *mut u32, USBBUF_LEN)}
-        .copy_from_slice(src);
+        unsafe { core::slice::from_raw_parts_mut(usb_buf.as_mut_ptr() as *mut u32, USBBUF_LEN) }
+            .copy_from_slice(src);
         usb_audio.write(usb_buf).ok();
     }
 }
