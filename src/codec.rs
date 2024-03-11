@@ -1,10 +1,6 @@
 // TLV320AIC3204
 #![allow(dead_code)]
-use crate::{
-    dsp::DSPComplex,
-    hal,
-    i2c::SHARED_I2CBUS,
-};
+use crate::{dsp::DSPComplex, hal, i2c::SHARED_I2CBUS};
 use hal::pio::PIOExt;
 use hal::{pac, pio::PIOBuilder};
 
@@ -139,21 +135,27 @@ impl Codec {
         critical_section::with(|cs| {
             let mut rc = SHARED_I2CBUS.borrow(cs).borrow_mut();
             let i2c = rc.as_mut().unwrap();
-            let chunks = &[
+            let chunks: &[&[u8]] = &[
                 // Reset
                 &[0x00, 0x00], // page 0
                 &[0x01, 0x01], // soft reset
                 // PLL
-                &[0x04, 0x03], // Low Range, from MCLK, to CODEC_CLKIN
-                &[0x05, (0b1 << 7 | 1 << 4 | 1 << 0)], // power up, P = 1, R = 1
-                &[0x06, 4],    // J = 4
-                &[0x07, (9152 >> 8) as u8], // D = 9152
-                &[0x08, (9152 & 0xff) as u8],
+                &[
+                    0x04,
+                    0x03,                         // Low Range, from MCLK, to CODEC_CLKIN
+                    (0b1 << 7 | 1 << 4 | 1 << 0), // power up, P = 1, R = 1
+                    4,                            // J = 4
+                    (9152 >> 8) as u8,
+                    (9152 & 0xff) as u8, // D = 9152
+                ],
                 // DAC Clock
-                &[0x0b, 1 << 7 | 2], // NDAC = 2
-                &[0x0c, 1 << 7 | 8], // MDAC = 8
-                &[0x0d, 0],          // DOSR = 32
-                &[0x0e, 32],
+                &[
+                    0x0b,       //
+                    1 << 7 | 2, // NDAC = 2
+                    1 << 7 | 8, // MDAC = 8
+                    0,          // DOSR = 32
+                    32,
+                ],
                 // &[0x19, 0x00], // PLL_CLKIN = MCLK // CDIV?
                 &[0x1b, 0b11001100], // Interface LJF, 16bit, BCLK out, WCLK out, DOUT no Hi-Z
                 // &[0x1c, 0],          // offset 0
@@ -161,9 +163,12 @@ impl Codec {
                 &[0x1e, 1 << 7 | 2], // BCLK DIV 2
                 &[0x3c, 17],         // DAC proc block = 17
                 // setup ADC
-                &[0x12, 2],          // NADC disable; ADC_CLK := DAC_CLK
-                &[0x13, 1 << 7 | 4], // MADC = 4 from ADC_CLK
-                &[0x14, 64],         // AOSR = 64
+                &[
+                    0x12,       //
+                    2,          // NADC disable; ADC_CLK := DAC_CLK
+                    1 << 7 | 4, // MADC = 4 from ADC_CLK
+                    64,         // AOSR = 64
+                ],
                 &[0x21, 0x00],       // dout
                 &[0x3d, 0x01],       // ADC PRB_R1 (Filter A, 1 IIR, AGC)
                 &[0x35, 0b00010010], // Bus Keeper dis, DOUT is Primary DOUT
@@ -174,28 +179,27 @@ impl Codec {
                 &[0x5e, 0x00],       // AGC Disabled
                 // routing
                 &[0x00, 0x01], // page 1
-                &[0x01, 0x08], // enable AVdd LDO
-                &[0x02, 0x01], // enable master analog power control
+                &[
+                    0x01, //
+                    0x08, // enable AVdd LDO
+                    0x01, // enable master analog power control
+                ],
                 // DAC analog blocks
-                &[0x14, 0x25], // HP startup time
-                &[0x0c, 0x08], // DAC to HP
-                &[0x0d, 0x08],
-                &[0x03, 0x00], // DAC PTM_P3/4
-                &[0x04, 0x00],
-                &[0x10, 0x0a], // DAC gain 10dB
-                &[0x11, 0x0a],
-                &[0x09, 0x30], // Power up HPL/HPR
+                &[0x14, 0x25],       // HP startup time
+                &[0x0c, 0x08, 0x08], // DAC to HP
+                &[0x03, 0x00, 0x00], // DAC PTM_P3/4
+                &[0x10, 0x0a, 0x0a], // DAC gain 10dB
+                &[0x09, 0x30],       // Power up HPL/HPR
                 // ADC analog
-                &[0x0a, 0x00], // input common mode 0.9V
-                &[0x3d, 0x00], // select ADC PTM_R4
-                &[0x47, 0x32], // MicPGA startup delay 3.1ms
-                &[0x7b, 0x01], // REF charging 40ms
-                &[0x34, 0x10], // Route IN2L to LEFT_P with 10K
-                &[0x36, 0x10], // Route IN2R to LEFT_N with 10k
-                &[0x37, 0x40], // Route IN1R to RIGHT_P with 10k
-                &[0x39, 0x10], // Route IN1L to RIGHT_N with 10k
-                &[0x3b, 72],   // L MICPGA: unmute, set gain to (72/2)dB
-                &[0x3c, 72],   // R MICPGA: same as L
+                &[0x0a, 0x00],   // input common mode 0.9V
+                &[0x3d, 0x00],   // select ADC PTM_R4
+                &[0x47, 0x32],   // MicPGA startup delay 3.1ms
+                &[0x7b, 0x01],   // REF charging 40ms
+                &[0x34, 0x10],   // Route IN2L to LEFT_P with 10K
+                &[0x36, 0x10],   // Route IN2R to LEFT_N with 10k
+                &[0x37, 0x40],   // Route IN1R to RIGHT_P with 10k
+                &[0x39, 0x10],   // Route IN1L to RIGHT_N with 10k
+                &[0x3b, 72, 72], // MICPGA: unmute, set gain to (72/2)dB
             ];
 
             for chunk in chunks {
@@ -205,14 +209,14 @@ impl Codec {
             cortex_m::asm::delay(125_000 * 10); // about 10ms
 
             let chunks = &[
-                &[0x00, 0x00],       // page 0
-                &[0x3f, 0b11010100], // powerup LR DAC
-                &[0x40, 0b00000000], // unmute dac digial volume
-                &[0x51, 0b11000000], // powerup LR ADC
-                &[0x52, 0x00],       // unmute adc digial volume
+                [0x00, 0x00],       // page 0
+                [0x3f, 0b11010100], // powerup LR DAC
+                [0x40, 0b00000000], // unmute dac digial volume
+                [0x51, 0b11000000], // powerup LR ADC
+                [0x52, 0x00],       // unmute adc digial volume
             ];
             for chunk in chunks {
-                i2c.write(Self::I2C_ADDR, *chunk).unwrap();
+                i2c.write(Self::I2C_ADDR, chunk).unwrap();
             }
         });
 
