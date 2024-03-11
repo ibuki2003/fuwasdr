@@ -54,9 +54,28 @@ impl Manager {
         // in screen = 133px
 
         self.lcd
-            .set_window(0, Self::WF_Y - 8, LcdDisplay::LCD_WIDTH, 8);
+            .set_window(0, Self::WF_Y - 16, LcdDisplay::LCD_WIDTH, 16);
+
         self.lcd
             .send_data_iter(core::iter::repeat(0x00).take(LcdDisplay::LCD_WIDTH as usize * 8 * 2));
+        let x = Self::WF_X + 128 - (freq % 10_000 * 256 / 192000) as u16 - 120;
+
+        for _ in 0..8 {
+            for _ in 0..Self::WF_X {
+                self.lcd.send_data_unchecked(&[0, 0]);
+            }
+            for i in Self::WF_X..Self::WF_X + 256 {
+                if i >= x && (i - x) * 3 % 40 < 3 {
+                    self.lcd.send_data_unchecked(&[0xff, 0xff]);
+                } else {
+                    self.lcd.send_data_unchecked(&[0, 0]);
+                }
+            }
+            for _ in 0..Self::WF_X {
+                self.lcd.send_data_unchecked(&[0, 0]);
+            }
+        }
+
 
         buf[4] = b'.';
         buf[6] = b'M';
@@ -80,11 +99,9 @@ impl Manager {
             }
 
             let text = super::text::TextRendererMisaki::new(&buf[i..7]);
-            self.lcd.set_window(x, Self::WF_Y - 8, 1, 8);
+
             self.lcd
-                .send_data_iter(core::iter::repeat(0xff).take(8 * 2));
-            self.lcd
-                .set_window(x + 1, Self::WF_Y - 8, text.size().0, text.size().1);
+                .set_window(x + 1 - (4 - i) as u16 * 8, Self::WF_Y - 16, text.size().0, text.size().1);
             self.lcd.send_data_iter(text);
 
             f += 1;
