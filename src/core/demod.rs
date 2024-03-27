@@ -46,6 +46,10 @@ impl DemodTask {
         debug_assert!(p & 0x8000_0000 == 0);
         self.fifo.write_blocking(p);
     }
+
+    pub fn set_freq(&mut self, freq: i32) {
+        self.fifo.write_blocking(0x8000_0000 | freq as u32);
+    }
 }
 
 fn core1_task(tx: Tx, dma: Dma) {
@@ -56,7 +60,7 @@ fn core1_task(tx: Tx, dma: Dma) {
     let mut fifo = sio.fifo;
 
     let mut shifter = crate::sdr::shift::Shifter::new();
-    shifter.set_freq(10_000);
+    shifter.set_freq(0);
 
     let buf = cortex_m::singleton!(: DemodBuffer = [DSPComplex::zero(); DEMOD_BUF_SIZE]).unwrap();
     let buf2 = cortex_m::singleton!(: [DSPComplex; Shifter::OUTPUT_SIZE] = [DSPComplex::zero(); Shifter::OUTPUT_SIZE]).unwrap();
@@ -79,7 +83,11 @@ fn core1_task(tx: Tx, dma: Dma) {
 
         if p & 0x8000_0000 != 0 {
             // read command
-            todo!();
+            let p = ((p << 1) as i32) >> 1; // sign extend
+
+            // set freq is the only command now
+            shifter.set_freq(-p);
+            continue;
         }
 
         let t = unsafe { &*pac::TIMER::PTR }.timerawl.read().bits();

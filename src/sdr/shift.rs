@@ -1,4 +1,4 @@
-use crate::{dsp::DSPComplex, SAMPLE_RATE};
+use crate::dsp::DSPComplex;
 
 use super::DS_RATIO;
 
@@ -61,6 +61,14 @@ impl Shifter {
             *o = acc;
         }
 
-        self.phase = self.phase.wrapping_add_signed(self.omega * Self::INPUT_SIZE as i32);
+        self.phase = self
+            .phase
+            .wrapping_add_signed(self.omega * Self::INPUT_SIZE as i32);
+    }
+}
+
+impl Default for Shifter {
+    fn default() -> Self {
+        Self::new()
     }
 }
