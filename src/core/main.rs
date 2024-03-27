@@ -1,5 +1,10 @@
 use crate::{
-    board, codec, display,
+    board, codec,
+    core::{
+        demod::{self, DEMOD_BUF_SIZE},
+        dma::DMABUF_LEN,
+    },
+    display,
     dsp::{self, DSPComplex},
     hal,
     i2c::SHARED_I2CBUS,
@@ -141,8 +146,12 @@ pub fn main() -> ! {
 
     let mut t = timer.get_counter_low();
 
-    let mut gain = 0;
-    codec.set_adc_gain(gain);
+    let mut demod_tune: i32 = 0;
+    let mut adc_gain: i8 = 30;
+    codec.set_adc_gain(adc_gain);
+    let mut dac_gain: i8 = 20;
+    codec.set_dac_gain(dac_gain);
+    let mut agc: bool = false;
 
     const TS_TBL: [u32; 9] = [
         1,
@@ -156,10 +165,14 @@ pub fn main() -> ! {
         100_000_000,
     ];
     let mut cursor = 0;
-    const CURSOR_MOD: u8 = TS_TBL.len() as u8 + 1;
+    const CURSOR_MOD: u8 = 16;
 
     display.draw_freq(clockctl.get_current_freq().to_Hz());
     display.draw_cursor(cursor);
+    display.draw_demod_freq(demod_tune);
+    display.draw_adc_gain(adc_gain);
+    display.draw_agc(agc);
+    display.draw_volume(dac_gain);
 
     // main loop
     loop {
@@ -205,24 +218,37 @@ pub fn main() -> ! {
         }
         if rot != 0 {
             match cursor {
-                0..=8 => {
+                0..=3 => {
+                    // demod tune
+                    demod_tune += rot as i32 * TS_TBL[(cursor) as usize + 1] as i32;
+                    demod_tune = demod_tune.clamp(-96000, 96000);
+                    demod.set_freq(demod_tune);
+                    display.draw_demod_freq(demod_tune);
+                }
+                4..=12 => {
                     // tune
                     let f = clockctl.get_current_freq();
-                    let tune_step = TS_TBL[cursor as usize].max(clockctl.get_tune_step() as u32);
+                    let tune_step =
+                        TS_TBL[cursor as usize - 4].max(clockctl.get_tune_step() as u32);
                     let f = f.to_Hz().wrapping_add(rot as u32 * tune_step);
                     match clockctl.tune(hal::fugit::HertzU32::Hz(f)) {
                         Err(e) => info!("Failed to tune: {}", e),
                         Ok(_) => display.draw_freq(f),
                     }
                 }
-                9 => {
-                    // agc
-                    gain = (gain as i32 + rot).clamp(0, 95) as u8;
-                    codec.set_adc_gain(gain);
-                    let mut buf = [0u8; 2];
-                    buf[0] = b'0' + gain / 10;
-                    buf[1] = b'0' + gain % 10;
-                    display.draw_text(&buf, 280, 10);
+                13 => {
+                    adc_gain = (adc_gain + rot as i8).clamp(0, 95);
+                    codec.set_adc_gain(adc_gain);
+                    display.draw_adc_gain(adc_gain);
+                }
+                14 => {
+                    agc = !agc;
+                    display.draw_agc(agc);
+                }
+                15 => {
+                    dac_gain = (dac_gain + rot as i8).clamp(-6, 29);
+                    codec.set_dac_gain(dac_gain);
+                    display.draw_volume(dac_gain);
                 }
                 _ => core::unreachable!(),
             }

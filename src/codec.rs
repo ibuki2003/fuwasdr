@@ -233,7 +233,7 @@ impl Codec {
             let chunks = &[
                 [0x00, 0x00],       // page 0
                 [0x3f, 0b11010100], // powerup LR DAC
-                [0x40, 0b00000000], // unmute dac digial volume
+                [0x40, 0b00000010], // unmute dac digial volume; left follows right
                 [0x51, 0b11000000], // powerup LR ADC
                 [0x52, 0x00],       // unmute adc digial volume
             ];
@@ -264,24 +264,23 @@ impl Codec {
         });
     }
 
-    pub fn set_adc_gain(&mut self, v: u8) {
+    pub fn set_adc_gain(&mut self, v: i8) {
         critical_section::with(|cs| {
             let mut rc = SHARED_I2CBUS.borrow(cs).borrow_mut();
             let i2c = rc.as_mut().unwrap();
+            let v = v.clamp(0, 95) as u8 & 0x7f;
             i2c.write(Self::I2C_ADDR, &[0x00, 0x01]).unwrap();
-            i2c.write(Self::I2C_ADDR, &[0x3b, v]).unwrap();
-            i2c.write(Self::I2C_ADDR, &[0x3c, v]).unwrap();
+            i2c.write(Self::I2C_ADDR, &[0x3b, v, v]).unwrap();
         });
     }
 
-    pub fn set_volume(&mut self, v: i8) {
+    pub fn set_dac_gain(&mut self, v: i8) {
         critical_section::with(|cs| {
             let mut rc = SHARED_I2CBUS.borrow(cs).borrow_mut();
             let i2c = rc.as_mut().unwrap();
-            let vv = (v as u8) >> 1;
-            i2c.write(Self::I2C_ADDR, &[0x00, 0x00]).unwrap();
-            i2c.write(Self::I2C_ADDR, &[0x53, vv]).unwrap();
-            i2c.write(Self::I2C_ADDR, &[0x54, vv]).unwrap();
+            let vv = v.clamp(-6, 29) as u8 & 0x3f;
+            i2c.write(Self::I2C_ADDR, &[0x00, 0x01]).unwrap();
+            i2c.write(Self::I2C_ADDR, &[0x10, vv, vv]).unwrap();
         });
     }
 

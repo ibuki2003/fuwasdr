@@ -11,8 +11,15 @@ pub struct Manager {
 impl Manager {
     const FREQ_X: u16 = 64;
     const FREQ_Y: u16 = 0;
+    const TUNE_X: u16 = 224;
+    const TUNE_Y: u16 = 24;
     const WF_X: u16 = 32;
     const WF_Y: u16 = 64;
+
+    const OPTS_X: u16 = 290;
+    const ADCGAIN_Y: u16 = 0;
+    const AGC_Y: u16 = 10;
+    const VOL_Y: u16 = 20;
 
     pub fn new(lcd: LcdDisplay) -> Self {
         Self { lcd, spectrum_y: 0 }
@@ -29,17 +36,17 @@ impl Manager {
         self.lcd.send_data_iter(renderer);
     }
 
+    pub fn draw_text_small(&mut self, text: &[u8], x: u16, y: u16) {
+        let renderer = super::text::TextRendererMisaki::new(text);
+        let size = renderer.size();
+        self.lcd.set_window(x, y, size.0, size.1);
+        self.lcd.send_data_iter(renderer);
+    }
+
     pub fn draw_freq(&mut self, freq: u32) {
         let mut buf = [0u8; 9];
 
-        let mut f0 = freq;
-        for j in (0..9).rev() {
-            buf[j] = (f0 % 10) as u8 + b'0';
-            f0 /= 10;
-            if f0 == 0 {
-                break;
-            }
-        }
+        uint_to_string(freq, &mut buf);
 
         for i in 0..3 {
             self.draw_text(
@@ -76,53 +83,100 @@ impl Manager {
             }
         }
 
-        buf[4] = b'.';
         buf[6] = b'M';
         let mut f = (freq - 96_000 + 100_000 - 1) / 100_000;
         let mut x =
             (Self::WF_X as i32 + 128 + ((f * 100_000) as i32 - freq as i32) * 256 / 192000) as u16;
         while f * 100_000 < freq + 96_000 {
-            let mut f0 = f;
+            let i = uint_to_string(f, &mut buf[..5]);
+            buf[5] = buf[4];
+            buf[4] = b'.';
 
-            buf[5] = (f0 % 10) as u8 + b'0';
-            f0 /= 10;
-
-            let mut i = 0;
-            for j in (0..4).rev() {
-                buf[j] = (f0 % 10) as u8 + b'0';
-                f0 /= 10;
-                if f0 == 0 {
-                    i = j;
-                    break;
-                }
-            }
-
-            let text = super::text::TextRendererMisaki::new(&buf[i..7]);
-
-            self.lcd.set_window(
-                x + 1 - (4 - i) as u16 * 8,
-                Self::WF_Y - 16,
-                text.size().0,
-                text.size().1,
-            );
-            self.lcd.send_data_iter(text);
+            self.draw_text_small(&buf[i..6], x + 1 - (4 - i) as u16 * 8, Self::WF_Y - 16);
 
             f += 1;
             x += 133;
         }
     }
 
-    pub fn draw_cursor(&mut self, ts_k: u8) {
+    pub fn draw_demod_freq(&mut self, freq: i32) {
+        let x = 160_u16.wrapping_add_signed((freq / 750) as i16);
+
         self.lcd
-            .set_window(Self::FREQ_X, Self::FREQ_Y + 32, 16 * 9 + 8 * 2, 1);
-        for i in (0..3).rev() {
-            for j in (0..3).rev() {
-                self.lcd.send_data_iter(
-                    core::iter::repeat(if i * 3 + j == ts_k { 0xff } else { 0x00 }).take(16 * 2),
-                );
+            .set_window(0, Self::WF_Y - 24, LcdDisplay::LCD_WIDTH, 8);
+        self.lcd.send_data(&[]); // dummy
+        for j in (0..8).rev() {
+            for i in 0..LcdDisplay::LCD_WIDTH {
+                if i.abs_diff(x) <= j / 2 {
+                    self.lcd.send_data_unchecked(&[0xff, 0xff]);
+                } else {
+                    self.lcd.send_data_unchecked(&[0, 0]);
+                }
             }
-            self.lcd
-                .send_data_iter(core::iter::repeat(0x00).take(8 * 2));
+        }
+
+        let mut buf = [0u8; 6];
+        int_to_string(freq, &mut buf);
+        self.draw_text_small(&buf, Self::TUNE_X, Self::TUNE_Y);
+    }
+
+    pub fn draw_adc_gain(&mut self, gain: i8) {
+        let mut buf = [0u8; 3];
+        int_to_string(gain as i32, &mut buf);
+        self.draw_text_small(&buf, Self::OPTS_X, Self::ADCGAIN_Y);
+    }
+
+    pub fn draw_agc(&mut self, agc: bool) {
+        if agc {
+            self.draw_text_small(b"AGC", Self::OPTS_X, Self::AGC_Y);
+        } else {
+            self.draw_text_small(b"   ", Self::OPTS_X, Self::AGC_Y);
+        }
+    }
+
+    pub fn draw_volume(&mut self, volume: i8) {
+        let mut buf = [0u8; 3];
+        int_to_string(volume as i32, &mut buf);
+        self.draw_text_small(&buf, Self::OPTS_X, Self::VOL_Y);
+    }
+
+    /*
+    cursor pos:
+    0-3: demod tune (10Hz ~ 10kHz)
+    4-12: tune
+    13: adc gain
+    14: agc
+    15: volume
+    */
+    pub fn draw_cursor(&mut self, cursor: u8) {
+        // tune digit
+        self.lcd
+            .set_window(Self::FREQ_X, Self::FREQ_Y + 32, 16 * 9 + 8 * 3, 1);
+        for i in (0..9).rev() {
+            self.lcd.send_data_iter(
+                core::iter::repeat(if i == cursor - 4 { 0xff } else { 0x00 }).take(16 * 2),
+            );
+
+            if i % 3 == 0 {
+                self.lcd
+                    .send_data_iter(core::iter::repeat(0x00).take(8 * 2));
+            }
+        }
+
+        // demod tune digit
+        self.lcd
+            .set_window(Self::TUNE_X + 8, Self::TUNE_Y + 8, 8 * 4, 1);
+        for i in (0..4).rev() {
+            self.lcd.send_data_iter(
+                core::iter::repeat(if i == cursor { 0xff } else { 0x00 }).take(8 * 2),
+            );
+        }
+
+        self.lcd.set_window(Self::OPTS_X - 1, 0, 1, 40);
+        for i in 13..16 {
+            self.lcd.send_data_iter(
+                core::iter::repeat(if cursor == i { 0xff } else { 0x00 }).take(10 * 2),
+            );
         }
     }
 
@@ -146,6 +200,23 @@ impl Manager {
             self.spectrum_y = 0;
         }
     }
+}
+
+fn uint_to_string(mut v: u32, buf: &mut [u8]) -> usize {
+    for i in (0..buf.len()).rev() {
+        buf[i] = (v % 10) as u8 + b'0';
+        v /= 10;
+        if v == 0 {
+            // break;
+            return i;
+        }
+    }
+    0
+}
+
+fn int_to_string(v: i32, buf: &mut [u8]) -> usize {
+    buf[0] = if v < 0 { b'-' } else { b'+' };
+    uint_to_string(v.unsigned_abs(), &mut buf[1..]) + 1
 }
 
 const COLOR_SHIFT: u16 = 4;

@@ -125,6 +125,10 @@ impl LcdDisplay {
         }
     }
 
+    pub fn send_data_unchecked(&mut self, cmd: &'_ [u8]) {
+        self.spi.write(cmd).unwrap();
+    }
+
     pub fn set_window(&mut self, x: u16, y: u16, w: u16, h: u16) {
         self.send_command(&[
             0x2A,
