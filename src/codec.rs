@@ -28,6 +28,8 @@ pub struct Codec {
     sm_i2s: hal::pio::StateMachine<SmI2s, hal::pio::Running>,
     sm_i2s_rx: Option<Rx>,
     sm_i2s_tx: Option<Tx>,
+
+    dac_gain: i16,
 }
 
 impl Codec {
@@ -125,6 +127,8 @@ impl Codec {
             sm_i2s: sm_i2s.start(),
             sm_i2s_rx: Some(rx),
             sm_i2s_tx: Some(tx),
+
+            dac_gain: 0,
         }
     }
 
@@ -264,6 +268,7 @@ impl Codec {
         });
     }
 
+    // v: 1/2 dB
     pub fn set_adc_gain(&mut self, v: i8) {
         critical_section::with(|cs| {
             let mut rc = SHARED_I2CBUS.borrow(cs).borrow_mut();
@@ -274,13 +279,33 @@ impl Codec {
         });
     }
 
-    pub fn set_dac_gain(&mut self, v: i8) {
+    // set hp gain and volume in range -139..106
+    // v: 1/2 dB
+    pub fn set_dac_volume(&mut self, v: i16) {
+        // driver gain: -6 ~ 29 [dB] step by 1dB
+        // digital volume: -63.5 ~ 24 [dB] step by 0.5dB (-127..=48)
+
         critical_section::with(|cs| {
             let mut rc = SHARED_I2CBUS.borrow(cs).borrow_mut();
             let i2c = rc.as_mut().unwrap();
-            let vv = v.clamp(-6, 29) as u8 & 0x3f;
-            i2c.write(Self::I2C_ADDR, &[0x00, 0x01]).unwrap();
-            i2c.write(Self::I2C_ADDR, &[0x10, vv, vv]).unwrap();
+
+            let mut vol = v - self.dac_gain * 2;
+            if !(-20..=0).contains(&vol) {
+                let gain = ((v + 10) >> 1).clamp(-6, 29);
+                self.dac_gain = gain;
+                vol = v - gain * 2;
+                defmt::info!("gain {} vol {}", gain, vol);
+
+                let gain = gain as u8 & 0x3f;
+
+                i2c.write(Self::I2C_ADDR, &[0x00, 0x01]).unwrap();
+                i2c.write(Self::I2C_ADDR, &[0x10, gain, gain]).unwrap();
+            }
+
+            vol = vol.clamp(-127, 48);
+            i2c.write(Self::I2C_ADDR, &[0x00, 0x00]).unwrap();
+            i2c.write(Self::I2C_ADDR, &[0x41, vol as u8, vol as u8])
+                .unwrap();
         });
     }
 

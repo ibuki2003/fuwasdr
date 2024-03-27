@@ -16,7 +16,7 @@ impl Manager {
     const WF_X: u16 = 32;
     const WF_Y: u16 = 64;
 
-    const OPTS_X: u16 = 290;
+    const OPTS_X: u16 = 282;
     const ADCGAIN_Y: u16 = 0;
     const AGC_Y: u16 = 10;
     const VOL_Y: u16 = 20;
@@ -92,7 +92,7 @@ impl Manager {
             buf[5] = buf[4];
             buf[4] = b'.';
 
-            self.draw_text_small(&buf[i..6], x + 1 - (4 - i) as u16 * 8, Self::WF_Y - 16);
+            self.draw_text_small(&buf[i..7], x + 1 - (4 - i) as u16 * 8, Self::WF_Y - 16);
 
             f += 1;
             x += 133;
@@ -121,7 +121,7 @@ impl Manager {
     }
 
     pub fn draw_adc_gain(&mut self, gain: i8) {
-        let mut buf = [0u8; 3];
+        let mut buf = [0u8; 4];
         int_to_string(gain as i32, &mut buf);
         self.draw_text_small(&buf, Self::OPTS_X, Self::ADCGAIN_Y);
     }
@@ -134,8 +134,8 @@ impl Manager {
         }
     }
 
-    pub fn draw_volume(&mut self, volume: i8) {
-        let mut buf = [0u8; 3];
+    pub fn draw_volume(&mut self, volume: i16) {
+        let mut buf = [0u8; 4];
         int_to_string(volume as i32, &mut buf);
         self.draw_text_small(&buf, Self::OPTS_X, Self::VOL_Y);
     }

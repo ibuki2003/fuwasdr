@@ -149,8 +149,8 @@ pub fn main() -> ! {
     let mut demod_tune: i32 = 0;
     let mut adc_gain: i8 = 30;
     codec.set_adc_gain(adc_gain);
-    let mut dac_gain: i8 = 20;
-    codec.set_dac_gain(dac_gain);
+    let mut dac_gain: i16 = 0;
+    codec.set_dac_volume(dac_gain);
     let mut agc: bool = false;
 
     const TS_TBL: [u32; 9] = [
@@ -220,7 +220,7 @@ pub fn main() -> ! {
             match cursor {
                 0..=3 => {
                     // demod tune
-                    demod_tune += rot as i32 * TS_TBL[(cursor) as usize + 1] as i32;
+                    demod_tune += rot * TS_TBL[(cursor) as usize + 1] as i32;
                     demod_tune = demod_tune.clamp(-96000, 96000);
                     demod.set_freq(demod_tune);
                     display.draw_demod_freq(demod_tune);
@@ -246,8 +246,8 @@ pub fn main() -> ! {
                     display.draw_agc(agc);
                 }
                 15 => {
-                    dac_gain = (dac_gain + rot as i8).clamp(-6, 29);
-                    codec.set_dac_gain(dac_gain);
+                    dac_gain = (dac_gain + rot as i16).clamp(-139, 106);
+                    codec.set_dac_volume(dac_gain);
                     display.draw_volume(dac_gain);
                 }
                 _ => core::unreachable!(),
