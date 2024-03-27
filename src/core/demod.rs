@@ -1,6 +1,12 @@
+use crate::{
+    codec::Tx,
+    dsp::DSPComplex,
+    sdr::{
+        demod::{demod_am, demod_fm, DemodMethod},
+        shift::Shifter,
+    },
+};
 use core::cell::Cell;
-
-use crate::{codec::Tx, dsp::DSPComplex, sdr::shift::Shifter};
 use defmt::info;
 use rp2040_hal::{
     dma::single_buffer::Config,
@@ -48,7 +54,12 @@ impl DemodTask {
     }
 
     pub fn set_freq(&mut self, freq: i32) {
-        self.fifo.write_blocking(0x8000_0000 | freq as u32);
+        self.fifo
+            .write_blocking(0x8000_0000 | (freq as u32 & 0xffffff));
+    }
+
+    pub fn set_method(&mut self, method: DemodMethod) {
+        self.fifo.write_blocking(0x8100_0000 | method as u32);
     }
 }
 
@@ -63,7 +74,7 @@ fn core1_task(tx: Tx, dma: Dma) {
     shifter.set_freq(0);
 
     let buf = cortex_m::singleton!(: DemodBuffer = [DSPComplex::zero(); DEMOD_BUF_SIZE]).unwrap();
-    let buf2 = cortex_m::singleton!(: [DSPComplex; Shifter::OUTPUT_SIZE] = [DSPComplex::zero(); Shifter::OUTPUT_SIZE]).unwrap();
+    let buf_ds = cortex_m::singleton!(: [DSPComplex; Shifter::OUTPUT_SIZE] = [DSPComplex::zero(); Shifter::OUTPUT_SIZE]).unwrap();
 
     // to pass 192kHz sampled data
     let mut dmabuf = Cell::new(
@@ -78,15 +89,28 @@ fn core1_task(tx: Tx, dma: Dma) {
     )
     .start();
 
+    let mut method = DemodMethod::AM;
+
     loop {
         let p = fifo.read_blocking();
 
         if p & 0x8000_0000 != 0 {
             // read command
-            let p = ((p << 1) as i32) >> 1; // sign extend
+            let c = p >> 24;
+            match c {
+                0x80 => {
+                    // tune
+                    let f = ((p << 8) as i32) >> 8; // sign extend
 
-            // set freq is the only command now
-            shifter.set_freq(-p);
+                    // set freq is the only command now
+                    shifter.set_freq(-f);
+                }
+                0x81 => {
+                    // demodulation method
+                    method = unsafe { DemodMethod::from_u8(p as u8) };
+                }
+                _ => {}
+            }
             continue;
         }
 
@@ -98,20 +122,43 @@ fn core1_task(tx: Tx, dma: Dma) {
         // copy at first
         buf.copy_from_slice(buffer);
 
-        shifter.apply(buf, buf2);
+        if !matches!(method, DemodMethod::FM) {
+            shifter.apply(buf, buf_ds);
+            let t2 = unsafe { &*pac::TIMER::PTR }.timerawl.read().bits();
+            info!("shift time: {} us", t2.wrapping_sub(t));
+        }
 
-        for (i, x) in buf2.iter().enumerate() {
-            let v = x.norm().0 as u16;
+        // here demod_**() process into buf2
+        match method {
+            DemodMethod::AM => {
+                demod_am(buf_ds);
+            }
+            DemodMethod::FM => {
+                demod_fm(buf);
+                // downsample
+                for i in (0..buf.len()).step_by(4) {
+                    let mut a: i32 = 0;
+                    for j in 0..4 {
+                        a += buf[i + j].re.0 as i32;
+                    }
+                    a /= 4;
+                    buf_ds[i >> 2].re.0 = a as i16;
+                }
+            }
+        }
+
+        for (i, x) in buf_ds.iter().enumerate() {
+            let v = x.re.0;
             for j in 0..4 {
                 dmabuf.get_mut()[i * 4 + j] = ((v as u32) << 16) | v as u32;
             }
         }
 
+        let t2 = unsafe { &*pac::TIMER::PTR }.timerawl.read().bits();
+        info!("demod time: {} us", t2.wrapping_sub(t));
+
         let (dma, buf, tx) = tfr.wait();
         let buff = dmabuf.replace(buf);
         tfr = Config::new(dma, buff, tx).start();
-
-        let t2 = unsafe { &*pac::TIMER::PTR }.timerawl.read().bits();
-        info!("demod time: {} us", t2.wrapping_sub(t));
     }
 }

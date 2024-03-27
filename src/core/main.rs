@@ -8,6 +8,7 @@ use crate::{
     dsp::{self, DSPComplex},
     hal,
     i2c::SHARED_I2CBUS,
+    sdr::demod::DemodMethod,
 };
 use defmt::*;
 use hal::{
@@ -151,7 +152,8 @@ pub fn main() -> ! {
     codec.set_adc_gain(adc_gain);
     let mut dac_gain: i16 = 0;
     codec.set_dac_volume(dac_gain);
-    let mut agc: bool = false;
+
+    let mut method = DemodMethod::AM;
 
     const TS_TBL: [u32; 9] = [
         1,
@@ -171,8 +173,8 @@ pub fn main() -> ! {
     display.draw_cursor(cursor);
     display.draw_demod_freq(demod_tune);
     display.draw_adc_gain(adc_gain);
-    display.draw_agc(agc);
     display.draw_volume(dac_gain);
+    display.draw_method(method);
 
     // main loop
     loop {
@@ -242,13 +244,20 @@ pub fn main() -> ! {
                     display.draw_adc_gain(adc_gain);
                 }
                 14 => {
-                    agc = !agc;
-                    display.draw_agc(agc);
-                }
-                15 => {
                     dac_gain = (dac_gain + rot as i16).clamp(-139, 106);
                     codec.set_dac_volume(dac_gain);
                     display.draw_volume(dac_gain);
+                }
+                15 => {
+                    method = unsafe {
+                        DemodMethod::from_u8(
+                            (method as u8 as i8 + rot as i8)
+                                .wrapping_rem_euclid(DemodMethod::METHOD_COUNT as i8)
+                                as u8,
+                        )
+                    };
+                    demod.set_method(method);
+                    display.draw_method(method);
                 }
                 _ => core::unreachable!(),
             }

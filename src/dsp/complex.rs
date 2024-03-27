@@ -27,6 +27,13 @@ impl_op_ex!(*|a: &DSPComplex, b: &DSPComplex| -> DSPComplex {
     }
 });
 
+impl_op_ex!(*|a: &DSPComplex, b: DSPNum| -> DSPComplex {
+    DSPComplex {
+        re: a.re * b,
+        im: a.im * b,
+    }
+});
+
 impl_op_ex!(<< |a: &DSPComplex, b: u16| -> DSPComplex {
     DSPComplex {
         re: a.re << b,
@@ -155,6 +162,20 @@ impl DSPComplex {
         DSPNum(((re * re + im * im) >> (DSPNum::FIXED_POINT)) as i16)
     }
 
+    pub fn fast_abs(&self) -> DSPNum {
+        let re = self.re.0.unsigned_abs() as u32;
+        let im = self.im.0.unsigned_abs() as u32;
+        let v = fast_sqrt(re * re + im * im);
+        DSPNum(v as i16)
+    }
+
+    pub fn abs(&self) -> DSPNum {
+        let re = self.re.0.unsigned_abs() as u32;
+        let im = self.im.0.unsigned_abs() as u32;
+        let v = slow_sqrt(re * re + im * im);
+        DSPNum(v as i16)
+    }
+
     // arr[i] = expi(i/128 * pi).conj()
     pub fn make_sequential_expi(arr: &mut [DSPComplex; 128]) {
         arr[0] = DSPComplex::one();
@@ -175,8 +196,42 @@ impl DSPComplex {
     }
 }
 
+impl From<DSPNum> for DSPComplex {
+    fn from(value: DSPNum) -> Self {
+        Self {
+            re: value,
+            im: DSPNum(0),
+        }
+    }
+}
+
 const fn is_power_of_two(x: usize) -> bool {
     x & (x - 1) == 0
+}
+
+// simple sqrt approximation
+const fn fast_sqrt(x: u32) -> u32 {
+    if x == 0 {
+        return 0;
+    }
+
+    let l = (31 - x.leading_zeros()) & !1;
+    let v = (x - (1 << l)) >> (l / 2);
+    let v = v / 3;
+    (1 << (l / 2)) | v
+}
+fn slow_sqrt(b: u32) -> u32 {
+    let mut result: u32 = 0;
+    let mut shift = 30;
+    while shift > 0 {
+        result <<= 1;
+        let large_cand = result | 1;
+        if large_cand * large_cand <= b >> shift {
+            result = large_cand;
+        }
+        shift -= 2;
+    }
+    result
 }
 
 const COSSIN_TABLE: [DSPComplex; 16] = [
@@ -215,7 +270,8 @@ fn atan2_(xy: DSPComplex) -> u16 {
     let mut angle: u16 = 0;
     let mut sc = DSPComplex::from_i16(1 << DSPNum::FIXED_POINT, 0);
 
-    for i in (0..16).rev() {
+    // decrease digit for speed up. thanks to additional 2 bit for orthant, result is 5bit depth
+    for i in (13..16).rev() {
         let sc2 = sc * COSSIN_TABLE[15 - i];
         if (sc2.im.0 as i32 * xy.re.0 as i32) < (sc2.re.0 as i32 * xy.im.0 as i32) {
             angle |= 1 << i;

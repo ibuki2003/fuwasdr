@@ -1,6 +1,7 @@
 // Screen UI Manager
 
 use crate::display::LcdDisplay;
+use crate::sdr::demod::DemodMethod;
 
 pub struct Manager {
     lcd: super::lcd::LcdDisplay,
@@ -18,8 +19,8 @@ impl Manager {
 
     const OPTS_X: u16 = 282;
     const ADCGAIN_Y: u16 = 0;
-    const AGC_Y: u16 = 10;
-    const VOL_Y: u16 = 20;
+    const VOL_Y: u16 = 10;
+    const METHOD_Y: u16 = 20;
 
     pub fn new(lcd: LcdDisplay) -> Self {
         Self { lcd, spectrum_y: 0 }
@@ -126,18 +127,18 @@ impl Manager {
         self.draw_text_small(&buf, Self::OPTS_X, Self::ADCGAIN_Y);
     }
 
-    pub fn draw_agc(&mut self, agc: bool) {
-        if agc {
-            self.draw_text_small(b"AGC", Self::OPTS_X, Self::AGC_Y);
-        } else {
-            self.draw_text_small(b"   ", Self::OPTS_X, Self::AGC_Y);
-        }
-    }
-
     pub fn draw_volume(&mut self, volume: i16) {
         let mut buf = [0u8; 4];
         int_to_string(volume as i32, &mut buf);
         self.draw_text_small(&buf, Self::OPTS_X, Self::VOL_Y);
+    }
+
+    pub fn draw_method(&mut self, method: DemodMethod) {
+        let t = match method {
+            DemodMethod::AM => b"AM",
+            DemodMethod::FM => b"FM",
+        };
+        self.draw_text_small(t, Self::OPTS_X, Self::METHOD_Y);
     }
 
     /*
@@ -145,8 +146,8 @@ impl Manager {
     0-3: demod tune (10Hz ~ 10kHz)
     4-12: tune
     13: adc gain
-    14: agc
-    15: volume
+    14: volume
+    15: method
     */
     pub fn draw_cursor(&mut self, cursor: u8) {
         // tune digit
