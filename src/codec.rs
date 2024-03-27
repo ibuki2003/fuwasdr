@@ -73,22 +73,20 @@ impl Codec {
                     "  wait 1 gpio 4", // wait for WCLK 1(Left)
                     "  set x, 15",
                     "left:",
-                    "  wait 0 gpio 3", // wait for BCLK 0
                     "  out pins, 1",
-                    "  in pins, 1",
+                    "  wait 0 gpio 3", // wait for BCLK 0
                     "  wait 1 gpio 3", // wait for BCLK 1
+                    "  in pins, 1",
                     "  jmp x-- left",
-                    "  set pins, 0", // set data to 0
                     // right ch
                     "  wait 0 gpio 4", // wait for WCLK 0(Right)
                     "  set x, 15",
                     "right:",
-                    "  wait 0 gpio 3", // wait for BCLK 0
                     "  out pins, 1",
-                    "  in pins, 1",
+                    "  wait 0 gpio 3", // wait for BCLK 0
                     "  wait 1 gpio 3", // wait for BCLK 1
+                    "  in pins, 1",
                     "  jmp x-- right",
-                    "  set pins, 0", // set data to 0
                     // push data
                     "  push noblock",
                     ".wrap",
@@ -148,21 +146,25 @@ impl Codec {
                     (9152 >> 8) as u8,
                     (9152 & 0xff) as u8, // D = 9152
                 ],
-                // DAC Clock
+                // DAC Clock = 192kHz
                 &[
-                    0x0b,       //
+                    0x0b,
                     1 << 7 | 2, // NDAC = 2
                     1 << 7 | 8, // MDAC = 8
                     0,          // DOSR = 32
                     32,
                 ],
                 // &[0x19, 0x00], // PLL_CLKIN = MCLK // CDIV?
-                &[0x1b, 0b11001100], // Interface LJF, 16bit, BCLK out, WCLK out, DOUT no Hi-Z
-                // &[0x1c, 0],          // offset 0
+                &[
+                    0x1b,
+                    0b11001100, // Interface LJF, 16bit, BCLK out, WCLK out, DOUT no Hi-Z;
+                    1,          // offset 1
+                ],
                 &[0x1d, 0b00000100], // BDIV_CLKIN = DAC_CLK (fs * 32 * 8)
                 &[0x1e, 1 << 7 | 2], // BCLK DIV 2
                 &[0x3c, 17],         // DAC proc block = 17
                 // setup ADC
+                // ADC Clock = 192kHz
                 &[
                     0x12,       //
                     2,          // NADC disable; ADC_CLK := DAC_CLK
