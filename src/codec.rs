@@ -1,6 +1,6 @@
 // TLV320AIC3204
 #![allow(dead_code)]
-use crate::{dsp::DSPComplex, hal, i2c::SHARED_I2CBUS};
+use crate::{hal, i2c::SHARED_I2CBUS};
 use hal::pio::PIOExt;
 use hal::{pac, pio::PIOBuilder};
 
