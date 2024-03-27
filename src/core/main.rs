@@ -97,6 +97,16 @@ pub fn main() -> ! {
     let dma = pac.DMA.split(&mut pac.RESETS);
     super::dma::init(dma.ch0, codec.take_rx().unwrap());
 
+    let mut demod = demod::DemodTask::new(
+        &mut pac.PSM,
+        &mut pac.PPB,
+        sio.fifo,
+        codec.take_tx().unwrap(),
+        dma.ch1,
+    )
+    .map_err(|e| info!("Failed to initialize demod: {}", e))
+    .unwrap();
+
     let mut display = display::Manager::new(display::LcdDisplay::new(
         pac.SPI0,
         pins.lcd_reset.reconfigure(),
@@ -160,6 +170,14 @@ pub fn main() -> ! {
             });
 
             if fft_ready {
+                // send buffer to core1, for demodulation
+                for i in 0..DMABUF_LEN / DEMOD_BUF_SIZE {
+                    demod.send_buffer(unsafe {
+                        &*(crate::core::dma::DMABUF.as_ptr().add(i * DEMOD_BUF_SIZE)
+                            as *const [DSPComplex; DEMOD_BUF_SIZE])
+                    });
+                }
+
                 fft_buf.copy_from_slice(unsafe {
                     core::slice::from_raw_parts(
                         crate::core::dma::DMABUF.as_ptr() as *const DSPComplex,

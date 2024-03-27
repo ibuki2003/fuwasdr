@@ -856,6 +856,7 @@ checksum = "1ff2b9ae7e6dd6720fd9f64250c9087260e50fe98b6b032ccca65be3581167ca"
 dependencies = [
  "cortex-m",
  "critical-section",
+ "defmt",
  "embedded-dma",
  "embedded-hal 0.2.7",
  "embedded-hal 1.0.0",

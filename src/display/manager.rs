@@ -76,7 +76,6 @@ impl Manager {
             }
         }
 
-
         buf[4] = b'.';
         buf[6] = b'M';
         let mut f = (freq - 96_000 + 100_000 - 1) / 100_000;
@@ -100,8 +99,12 @@ impl Manager {
 
             let text = super::text::TextRendererMisaki::new(&buf[i..7]);
 
-            self.lcd
-                .set_window(x + 1 - (4 - i) as u16 * 8, Self::WF_Y - 16, text.size().0, text.size().1);
+            self.lcd.set_window(
+                x + 1 - (4 - i) as u16 * 8,
+                Self::WF_Y - 16,
+                text.size().0,
+                text.size().1,
+            );
             self.lcd.send_data_iter(text);
 
             f += 1;

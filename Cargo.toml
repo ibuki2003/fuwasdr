@@ -19,7 +19,7 @@ panic-probe = { version = "0.3.1", features = ["print-defmt"] }
 pio = "0.2.1"
 pio-proc = "0.2.2"
 rp-pico = "0.8.0"
-rp2040-hal = { version = "0.9.2", features = ["eh1_0_alpha", "critical-section-impl"] }
+rp2040-hal = { version = "0.9.2", features = ["eh1_0_alpha", "critical-section-impl", "defmt"] }
 usb-device = "0.2.9"
 usbd-audio = "0.1.0"
 

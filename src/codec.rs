@@ -11,7 +11,7 @@ type PIODevice = pac::PIO0;
 type SmClk = (PIODevice, hal::pio::SM0);
 type SmI2s = (PIODevice, hal::pio::SM1);
 pub type Rx = hal::pio::Rx<SmI2s>;
-
+pub type Tx = hal::pio::Tx<SmI2s>;
 
 pub struct Codec {
     pin_mclk: PinCodecMclk,
@@ -27,7 +27,7 @@ pub struct Codec {
     sm_clk: hal::pio::StateMachine<SmClk, hal::pio::Running>,
     sm_i2s: hal::pio::StateMachine<SmI2s, hal::pio::Running>,
     sm_i2s_rx: Option<Rx>,
-    sm_i2s_tx: hal::pio::Tx<SmI2s>,
+    sm_i2s_tx: Option<Tx>,
 }
 
 impl Codec {
@@ -124,7 +124,7 @@ impl Codec {
             sm_clk: sm_clk.start(),
             sm_i2s: sm_i2s.start(),
             sm_i2s_rx: Some(rx),
-            sm_i2s_tx: tx,
+            sm_i2s_tx: Some(tx),
         }
     }
 
@@ -249,9 +249,8 @@ impl Codec {
         self.sm_i2s_rx.take()
     }
 
-    pub fn try_write_sample(&mut self, v: DSPComplex) -> bool {
-        self.sm_i2s_tx
-            .write(unsafe { *(&v as *const DSPComplex as *const u32) })
+    pub fn take_tx(&mut self) -> Option<Tx> {
+        self.sm_i2s_tx.take()
     }
 
     pub fn set_agc_target(&mut self, v: u8) {
