@@ -38,7 +38,14 @@ impl Manager {
     }
 
     pub fn draw_text_small(&mut self, text: &[u8], x: u16, y: u16) {
-        let renderer = super::text::TextRendererMisaki::new(text);
+        let renderer = super::text::TextRendererMisakiEn::new(text);
+        let size = renderer.size();
+        self.lcd.set_window(x, y, size.0, size.1);
+        self.lcd.send_data_iter(renderer);
+    }
+
+    pub fn draw_text_misaki(&mut self, text: &[u16], x: u16, y: u16) {
+        let renderer = super::text::MisakiTextRender::new(text);
         let size = renderer.size();
         self.lcd.set_window(x, y, size.0, size.1);
         self.lcd.send_data_iter(renderer);
