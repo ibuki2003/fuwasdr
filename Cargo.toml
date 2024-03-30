@@ -15,6 +15,7 @@ defmt-rtt = "0.4.0"
 embedded-hal = { version = "^1.0.0" }
 embedded-hal-bus = "0.1.0"
 num = { version = "0.4.1", default-features = false }
+panic-halt = "0.2.0"
 panic-probe = { version = "0.3.1", features = ["print-defmt"] }
 pio = "0.2.1"
 pio-proc = "0.2.2"
@@ -44,6 +45,7 @@ lto = 'fat'
 opt-level = "z"
 overflow-checks = false
 strip = true
+panic = 'abort'
 
 # do not optimize proc-macro crates = faster builds from scratch
 [profile.dev.build-override]
