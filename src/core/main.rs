@@ -2,9 +2,10 @@ use crate::{
     board, codec,
     core::{
         demod::{self, DEMOD_BUF_SIZE},
+        display::DispManager,
         dma::DMABUF_LEN,
     },
-    display,
+    display::lcd::LcdDisplay,
     dsp::{self, DSPComplex},
     hal,
     i2c::SHARED_I2CBUS,
@@ -113,7 +114,7 @@ pub fn main() -> ! {
     .map_err(|e| info!("Failed to initialize demod: {}", e))
     .unwrap();
 
-    let mut display = display::Manager::new(display::LcdDisplay::new(
+    let mut display = DispManager::new(LcdDisplay::new(
         pac.SPI0,
         pins.lcd_reset.reconfigure(),
         pins.lcd_touchirq.reconfigure(),

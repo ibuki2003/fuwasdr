@@ -1,15 +1,15 @@
 // Screen UI Manager
 
-use crate::display::LcdDisplay;
+use crate::display::{lcd::LcdDisplay, text};
 use crate::sdr::demod::DemodMethod;
 
-pub struct Manager {
-    lcd: super::lcd::LcdDisplay,
+pub struct DispManager {
+    lcd: LcdDisplay,
 
     spectrum_y: u16,
 }
 
-impl Manager {
+impl DispManager {
     const FREQ_X: u16 = 64;
     const FREQ_Y: u16 = 0;
     const TUNE_X: u16 = 224;
@@ -31,21 +31,21 @@ impl Manager {
     }
 
     pub fn draw_text(&mut self, text: &[u8], x: u16, y: u16) {
-        let renderer = super::text::TextRendererEN::new(text);
+        let renderer = text::TextRendererEN::new(text);
         let size = renderer.size();
         self.lcd.set_window(x, y, size.0, size.1);
         self.lcd.send_data_iter(renderer);
     }
 
     pub fn draw_text_small(&mut self, text: &[u8], x: u16, y: u16) {
-        let renderer = super::text::TextRendererMisakiEn::new(text);
+        let renderer = text::TextRendererMisakiEn::new(text);
         let size = renderer.size();
         self.lcd.set_window(x, y, size.0, size.1);
         self.lcd.send_data_iter(renderer);
     }
 
     pub fn draw_text_misaki(&mut self, text: &[u16], x: u16, y: u16) {
-        let renderer = super::text::MisakiTextRender::new(text);
+        let renderer = text::MisakiTextRender::new(text);
         let size = renderer.size();
         self.lcd.set_window(x, y, size.0, size.1);
         self.lcd.send_data_iter(renderer);
