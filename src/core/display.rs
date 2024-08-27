@@ -227,13 +227,18 @@ fn int_to_string(v: i32, buf: &mut [u8]) -> usize {
     uint_to_string(v.unsigned_abs(), &mut buf[1..]) + 1
 }
 
-const COLOR_SHIFT: u16 = 4;
 // map from 0..=65535
 fn colormap(v: u16) -> u16 {
-    if v >= (1 << (16 - COLOR_SHIFT)) {
-        return 0xffff;
-    }
-    let v = v << COLOR_SHIFT;
+    let mut vv = v;
+    let mut d = 0;
+    if vv < (1<<8) { d |= 8; vv <<= 8; }
+    if vv < (1<<12) { d |= 4; vv <<= 4; }
+    if vv < (1<<14) { d |= 2; vv <<= 2; }
+    if vv < (1<<15) { d |= 1; vv <<= 1; }
+    d = 15 - d;
+
+    // logarighmic scale
+    let v = (d << 12) | (vv >> 4);
     match v {
         0..=16383 => v >> 9,
         16384..=49151 => ((v - 16384) >> 4) | 31,
